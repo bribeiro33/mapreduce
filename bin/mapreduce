@@ -1,0 +1,100 @@
+#!/bin/bash
+#
+# mapreduce
+#
+# Start, stop, and check on MapReduce Manager and Worker processes
+
+# Stop on errors, print commands
+set -Eeuo pipefail
+#set -x
+
+# Sanity check command line options
+usage() {
+    echo "Usage: $0 (start|stop|status|restart)"
+}
+
+if [ $# -ne 1 ]; then
+    usage
+    exit 1
+fi
+
+# Parse argument.  $1 is the first argument
+case $1 in
+    "start")
+		if pgrep -f mapreduce-manager &> /dev/null; then
+            echo "Error: mapreduce-manager is already running"
+		elif pgrep -f mapreduce-worker &> /dev/null; then 
+			echo "Error: mapreduce-worker is already running"
+		else 
+			echo "starting mapreduce ..."
+			mkdir -p var/log
+			rm -f var/log/mapreduce-manager.log var/log/mapreduce-worker-6002.log var/log/mapreduce-worker-6001.log
+			mapreduce-manager --host localhost --port 6000 --logfile var/log/mapreduce-manager.log &
+			sleep 2  # give the Manager time to start
+			mapreduce-worker --host localhost --port 6001 --manager-host localhost --manager-port 6000 --logfile var/log/mapreduce-worker-6001.log &
+			mapreduce-worker --host localhost --port 6002 --manager-host localhost --manager-port 6000 --logfile var/log/mapreduce-worker-6002.log &
+		fi
+        ;;
+
+    "stop")
+        echo "stopping mapreduce ..."
+		# Detect GNU vs BSD netcat. We need netcat to close the connection after
+		# sending a message, which requires different options.
+        set +o pipefail  # Avoid erroneous failures due to grep returning non-zero
+        if nc -h 2>&1 | grep -q "\-c"; then
+            NC="nc -c"
+        elif nc -h 2>&1 | grep -q "\-N"; then
+            NC="nc -N"
+        elif nc -h 2>&1 | grep -q "\-C"; then
+            NC="nc -C"
+        else
+            echo "Error detecting netcat version."
+            exit 1
+        fi
+        set -o pipefail
+
+        echo '{"message_type": "shutdown"}' | $NC localhost 6000 || true
+        sleep 2  # give the manager time to receive signal and send to workers
+
+        if pgrep -f mapreduce-manager &> /dev/null; then
+            echo "killing mapreduce manager ..."
+            pkill -f mapreduce-manager || true
+        fi
+        if pgrep -f mapreduce-worker &> /dev/null; then
+            echo "killing mapreduce worker ..."
+            pkill -f mapreduce-worker || true
+        fi
+        ;;
+
+    "status")
+        if pgrep -f mapreduce-manager &> /dev/null; then
+            echo "manager running"
+			found_manager=true
+        else
+            echo "manager not running"
+			found_manager=false
+        fi
+        if pgrep -f mapreduce-worker &> /dev/null; then
+            echo "workers running"
+			found_worker=true
+        else
+            echo "workers not running"
+			found_worker=false
+        fi
+		if $found_manager && $found_worker; then
+    		exit 0
+		else
+    		exit 1
+		fi
+        ;;
+
+    "restart")
+        $0 stop
+        $0 start
+        ;;
+
+    *)
+        usage
+        exit 1
+        ;;
+esac
