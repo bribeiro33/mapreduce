@@ -1,5 +1,7 @@
 """MapReduce framework Manager node."""
 import os
+from queue import Queue
+import shutil
 import socket
 import threading
 import tempfile
@@ -22,6 +24,19 @@ class WTag:
         self.host = host_in
         self.port = port_in
         self.state = state_in
+
+class Job:
+    """A class representing a Job task"""
+    def __init__(self, id, input_directory, output_directory, mapper_executable, reducer_executable, num_mappers, num_reducers):
+        """Construct a Job instance"""
+        self.job_id = id
+        self.input_dir = input_directory
+        self.output_dir = output_directory
+        self.mapper_exec = mapper_executable
+        self.reducer_exec = reducer_executable
+        self.num_mappers = num_mappers
+        self.num_reducers = num_reducers
+        self.is_completed = False
     
 class Manager:
     """Represent a MapReduce framework Manager node."""
@@ -42,6 +57,11 @@ class Manager:
         }
         self.shutdown = False
         self.workers = {}
+        self.worker_queue = Queue()
+        
+        self.curr_job_id = 0
+        self.job_queue = Queue()
+        self.is_executing_job = False
         
         self.tcp_thread = threading.Thread(target=self.tcp_listening)
         self.tcp_thread.start()
@@ -111,11 +131,30 @@ class Manager:
                         #job
                     )
                     self.workers[(new_worker.host, new_worker.port)] = new_worker
+                    # Add worker to worker queue as well
+                    self.worker_queue.put(new_worker)
                     LOGGER.info("registered worker %s:%s",
                         message_dict["worker_host"], message_dict["worker_port"],
                     )
                     # Send acknolegement to worker
                     self.send_ack(message_dict["worker_host"], message_dict["worker_port"])
+                
+                if message_dict["message_type"] == "new_manager_job":
+                    # Recieved new job conf
+                    LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
+                    # Remove message_type from message_dict
+                    message_dict.pop("message_type", None)
+                    
+                    # Create a new Job instance using own tracker and json data
+                    new_job = Job(id=self.curr_job_id, **message_dict)
+                    # Add to queue
+                    self.job_queue.put(new_job)
+                    # Increment curr_job_id for next Job added
+                    self.curr_job_id += 1
+
+                    # If no currently executing job, run new one
+                    if not self.is_executing_job:
+                        self.run_job()
 
     def send_ack(self, worker_host, worker_port):
         """Send the worker a registration ack."""
@@ -136,6 +175,64 @@ class Manager:
                     sock.connect((worker.host, worker.port))
                     shutdown_message = json.dumps({"message_type": "shutdown"})
                     sock.sendall(shutdown_message.encode('utf-8'))
+    
+    def run_job(self):
+        """Start executing a new job"""
+        # If not currently exec job (and queue isn't empty), start new job
+        # Manager runs each job to completion before starting a new one
+        if not self.is_executing_job and not self.job_queue.empty():
+            curr_job = self.job_queue.get()
+
+            # Delete output dir if it exists
+            if os.path.exists(curr_job.output_dir):
+                shutil.rmtree(curr_job.output_dir)
+            
+            # create new output directory
+            os.makedirs(curr_job.output_dir)
+            LOGGER.info("Created output")
+            # Create a shared dir for temp intermediate files
+            prefix = f"mapreduce-shared-job{curr_job.job_id:05d}-"
+            self.tmpdir = tempfile.TemporaryDirectory(prefix=prefix)
+            LOGGER.info("Created %s", self.tmpdir.name)
+        
+            job_completed = False
+            while not job_completed:
+                time.sleep(0.1)
+                #Once everything is working TODO: change
+                #job_completed = curr_job.is_completed 
+                self.input_partioning(curr_job)
+                job_completed = True
+            # Clean up the temporary directory
+            self.tmpdir.cleanup()
+            LOGGER.info("Cleaned up tmpdir %s", self.tmpdir.name)
+
+    def input_partioning(self, curr_job):
+        """Partition the input files into num_mappers partition"""
+        # Each partition is a "new_map_task"
+        # Get the input files from the job's input directory 
+        input_files = os.listdir(curr_job.input_dir)
+        # Sort the input files by name
+        input_files.sort()
+        # Partition the input files into num_mappers partions using round robin
+        # and sssign each partition a task_id by order of generation (start at 0)
+        partitions = []
+        task_id = 0
+        # creating num_mapper sublists with the files belonging to that partition
+        for files in [input_files[i::curr_job.num_mappers] for i in range(curr_job.num_mappers)]:
+            partitions.append({"task_id": task_id, "files": files})
+            task_id += 1
+
+        # Distribute the new_map_tasks to avaliable workers
+        self.distribute_new_map_tasks(partitions)
+
+    def distribute_new_map_tasks(self, partitions):
+        """Distribute the new_map_tasks to avaliable workers"""
+        for worker in self.workers:
+            if worker.state is "ready":
+
+
+
+
 
 @click.command()
 @click.option("--host", "host", default="localhost")

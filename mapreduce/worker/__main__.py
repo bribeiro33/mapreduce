@@ -146,7 +146,7 @@ class Worker:
                 if message_dict["message_type"] == "register_ack":
                     # manager has receieved worker registration
                     LOGGER.debug(
-                       "recieved\n%s", json.dumps(message_dict, indent=2),
+                        "recieved\n%s", json.dumps(message_dict, indent=2),
                     )
                     # create thread
                     # threads.append(thread)
