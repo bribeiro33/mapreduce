@@ -57,7 +57,6 @@ class Manager:
         }
         self.shutdown = False
         self.workers = {}
-        self.worker_queue = Queue()
         
         self.curr_job_id = 0
         self.job_queue = Queue()
@@ -131,8 +130,6 @@ class Manager:
                         #job
                     )
                     self.workers[(new_worker.host, new_worker.port)] = new_worker
-                    # Add worker to worker queue as well
-                    self.worker_queue.put(new_worker)
                     LOGGER.info("registered worker %s:%s",
                         message_dict["worker_host"], message_dict["worker_port"],
                     )
@@ -225,11 +222,35 @@ class Manager:
         # Distribute the new_map_tasks to avaliable workers
         self.distribute_new_map_tasks(partitions)
 
-    def distribute_new_map_tasks(self, partitions):
+    def distribute_new_map_tasks(self, new_map_tasks):
         """Distribute the new_map_tasks to avaliable workers"""
-        for worker in self.workers:
-            if worker.state is "ready":
+        for task in new_map_tasks:
+            is_assigned = False
+            for worker in self.workers.values():
+                if worker.state == "ready":
+                    self.assign_task(worker, task)
+                    is_assigned = True
+                    break
+            if not is_assigned:
+                time.sleep(0.1) # ???? TODO: check this
 
+    def assign_task(self, worker, task, ):
+        """Assign a task to the given worker --> send it to them"""
+        task_message = {
+            "message_type": "new_map_task",
+            "task_id": task.task_id,
+            "input_paths": task.files,
+            "executable": string,
+            "output_directory": self.tmpdir,
+            "num_partitions": len(new_map_tasks),
+            "worker_host": worker.host,
+            "worker_port": worker.port,
+        }
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.connect((worker.host, worker.port))
+            reg_ack_message = json.dumps(task_message)
+            sock.sendall(reg_ack_message.encode('utf-8'))
 
 
 
