@@ -8,6 +8,8 @@ import socket
 import string
 import threading
 import mapreduce.utils
+from pathlib import Path
+import subprocess
 
 
 # Configure logging
@@ -89,6 +91,36 @@ class Worker:
                 sock.sendall(message.encode('utf-8'))
             time.sleep(2)
     
+    def mapping(self, message_dict):
+        """carry out mapping"""
+
+        # mark state as busy since a task is beginning
+        self.state = "busy"
+
+        # get all the json variables for directing the work
+        input_paths = message_dict["input_paths"]
+        executable = message_dict["executable"]
+        output_directory = message_dict["output_directory"]
+
+        # 1. run the map executable on the input files
+
+        output_files = []
+        for path in input_paths:
+            input_filename = Path(path).name
+            output_directory = \
+                Path(message_dict["output_directory"]) / input_filename
+            with open(path, 'r', encoding='utf-8') as infile:
+                with open(output_directory, 'w', encoding='utf-8') as outfile:
+                    subprocess.run(executable, stdin=infile, stdout=outfile, check=True)
+            output_files.append(str(output_directory))
+
+        # 2. partition the map output into several intermediate partition files (new temp dir, local to worker)
+
+        # 3. Sort each output file by line
+
+        # 4. Move each sorted output file to the shared temporary directory specified by the Manager
+
+
     def tcp_listening(self):
         """Listen for incoming messages from manager."""
         # Create an INET, STREAMing socket, this is TCP
@@ -151,6 +183,8 @@ class Worker:
                     # create thread
                     # threads.append(thread)
                     self.hbthread.start()  
+                if message_dict["message_type"] == "new_map_task":
+                    self.mapping(message_dict)
             
             if self.hbthread.is_alive():
                 self.hbthread.join()            
