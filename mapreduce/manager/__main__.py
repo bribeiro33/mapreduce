@@ -151,6 +151,7 @@ class Manager:
 
                     # If no currently executing job, run new one
                     if not self.is_executing_job:
+                        self.curr_job_info = message_dict
                         self.run_job()
 
     def send_ack(self, worker_host, worker_port):
@@ -234,15 +235,19 @@ class Manager:
             if not is_assigned:
                 time.sleep(0.1) # ???? TODO: check this
 
-    def assign_task(self, worker, task, ):
+    def assign_task(self, worker, task):
         """Assign a task to the given worker --> send it to them"""
+        input_paths_list = []
+        for curr_file in task.files:
+            full_path = self.curr_job_info["input_dir"] + "/input/" + curr_file
+            input_paths_list.append(full_path)
         task_message = {
             "message_type": "new_map_task",
             "task_id": task.task_id,
             "input_paths": task.files,
-            "executable": string,
-            "output_directory": self.tmpdir,
-            "num_partitions": len(new_map_tasks),
+            "executable": self.curr_job_info["mapper_exec"],
+            "output_directory": self.tmpdir, # don't know if this is right
+            "num_partitions": self.curr_job_info["num_reducers"],
             "worker_host": worker.host,
             "worker_port": worker.port,
         }
