@@ -229,7 +229,7 @@ class Manager:
 				# Clean up the temporary directory
 				self.tmpdir.cleanup()
 				LOGGER.info("Cleaned up tmpdir %s", self.tmpdir.name)
-			time.sleep(0.1)
+			time.sleep(0.5)
 
 	def input_partioning(self, curr_job):
 		"""Partition the input files into num_mappers partition"""
