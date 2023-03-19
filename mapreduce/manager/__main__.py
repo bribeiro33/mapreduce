@@ -229,7 +229,7 @@ class Manager:
 				# Clean up the temporary directory
 				self.tmpdir.cleanup()
 				LOGGER.info("Cleaned up tmpdir %s", self.tmpdir.name)
-			time.sleep(3)
+			time.sleep(0.1)
 
 	def input_partioning(self, curr_job):
 		"""Partition the input files into num_mappers partition"""
@@ -253,7 +253,7 @@ class Manager:
 		"""Distribute the new_map_tasks to avaliable workers"""
 		LOGGER.info("Begin Map Stage")
 		curr_task_id = 0
-		while curr_task_id < len(new_map_tasks):
+		while curr_task_id < len(new_map_tasks) and not self.shutdown:
 			for worker in self.workers.values():
 				if worker.state == "ready":
 					# Assign the task to the worker, change its state, 
