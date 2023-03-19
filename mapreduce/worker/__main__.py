@@ -169,15 +169,6 @@ class Worker:
 			sock.connect((self.options["manager_host"], self.options["manager_port"]))
 			completion_msg = json.dumps(message_dict)
 			sock.sendall(completion_msg.encode('utf-8'))
-		# output_files = []
-		# for path in input_paths:
-		# 	input_filename = Path(path).name
-		# 	output_directory = \
-		# 		Path(message_dict["output_directory"]) / input_filename
-		# 	with open(path, 'r', encoding='utf-8') as infile:
-		# 		with open(output_directory, 'w', encoding='utf-8') as outfile:
-		# 			subprocess.run(executable, stdin=infile, stdout=outfile, check=True)
-		# 	output_files.append(str(output_directory))
 
 	def sort_file_lines(self, all_files, tmpdir_name):
 		"""Sort the content of all the given files by line."""

@@ -1,5 +1,6 @@
 """MapReduce framework Manager node."""
 import os
+from pathlib import Path
 from queue import Queue
 import shutil
 import socket
@@ -62,6 +63,7 @@ class Manager:
 		self.curr_job_id = 0
 		self.job_queue = Queue()
 		self.is_executing_job = False
+		self.running_process = "neither" # or "mapping" of "reducing"
 		self.tmpdir = None
 		
 		self.job_thread = threading.Thread(target=self.run_job)
@@ -218,20 +220,31 @@ class Manager:
 				prefix = f"mapreduce-shared-job{curr_job.job_id:05d}-"
 				self.tmpdir = tempfile.TemporaryDirectory(prefix=prefix)
 				LOGGER.info("Created %s", self.tmpdir.name)
-			
-				job_completed = False
-				while not job_completed:
-					#Once everything is working TODO: change
-					#job_completed = curr_job.is_completed 
-					new_map_tasks = self.input_partioning(curr_job)
-					self.distribute_new_map_tasks(new_map_tasks, curr_job)
-					job_completed = True
+
+				# Mapping 
+				LOGGER.info("Begin Map Stage")
+				self.running_processes = "mapping"
+				new_map_tasks = self.map_partioning(curr_job)
+				self.distribute_new_tasks(new_map_tasks, curr_job)
+				LOGGER.info("End Map Stage")
+
+				# Reducing
+				LOGGER.info("begin Reduce Stage")
+				self.running_processes = "reducing"
+				new_reduce_tasks = self.reduce_partitioning()
+				self.distribute_new_tasks(new_reduce_tasks, curr_job)
+				LOGGER.info("end Reduce Stage")
+
+				self.running_processes = "neither"
 				# Clean up the temporary directory
 				self.tmpdir.cleanup()
-				LOGGER.info("Cleaned up tmpdir %s", self.tmpdir.name)
+				LOGGER.info("Removed %s", self.tmpdir.name)
+
+				self.is_executing_job = False
+				LOGGER.info("Finished job. Output directory: %s", curr_job.output_dir)
 			time.sleep(0.5)
 
-	def input_partioning(self, curr_job):
+	def map_partioning(self, curr_job):
 		"""Partition the input files into num_mappers partition"""
 		# Each partition is a "new_map_task"
 		# Get the input files from the job's input directory 
@@ -249,42 +262,79 @@ class Manager:
 		
 		return partitions
 
-	def distribute_new_map_tasks(self, new_map_tasks, curr_job):
-		"""Distribute the new_map_tasks to avaliable workers"""
-		LOGGER.info("Begin Map Stage")
+	def reduce_partitioning(self):
+		"""Put the files with the same parts in the same task."""
+		partitions = []
 		curr_task_id = 0
-		while curr_task_id < len(new_map_tasks) and not self.shutdown:
+		dir_path = Path(self.tmpdir.name)
+		
+		all_files = os.listdir(self.tmpdir.name)
+		for file_name in all_files:
+			curr_part = "*-" + file_name.split("-")[1]
+			one_group = sorted(dir_path.glob(curr_part))
+			partitions.append({"task_id": curr_task_id, "files": one_group})
+			# Increment the task ID
+			curr_task_id += 1
+		
+		return partitions
+
+
+	def distribute_new_tasks(self, new_tasks, curr_job):
+		"""Distribute the new_tasks to avaliable workers"""
+		curr_task_id = 0
+		while curr_task_id < len(new_tasks) and not self.shutdown:
 			for worker in self.workers.values():
 				if worker.state == "ready":
 					# Assign the task to the worker, change its state, 
 					# and increment the curr_task_id to get the next tasks's value
-					self.assign_task(worker, new_map_tasks[curr_task_id], curr_job)
+					self.assign_task(worker, new_tasks[curr_task_id], curr_job)
 					worker.state = "busy"
 					curr_task_id += 1
 					break
 				else: 
 					time.sleep(0.5) # ???? TODO: check this, busy waiting?
 		
-		LOGGER.info("End Map Stage")
 
 	def assign_task(self, worker, task, curr_job):
 		"""Assign a task to the given worker --> send it to them"""
 		# Preps input_paths by combining input_dir and file names
 		input_paths_list = []
-		for curr_file in task.get("files"):
-			full_path = curr_job.input_dir + "/" + curr_file
-			input_paths_list.append(full_path)
 
-		task_message = {
-			"message_type": "new_map_task",
-			"task_id": task.get("task_id"),
-			"input_paths": input_paths_list, 
-			"executable": curr_job.mapper_exec,
-			"output_directory": self.tmpdir.name, # don't know if this is right
-			"num_partitions": curr_job.num_reducers,
-			"worker_host": worker.host,
-			"worker_port": worker.port,
-		}
+		if self.running_processes is "mapping":
+			for curr_file in task.get("files"):
+				full_path = curr_job.input_dir + "/" + curr_file
+				input_paths_list.append(full_path)
+
+			task_message = {
+				"message_type": "new_map_task",
+				"task_id": task.get("task_id"),
+				"input_paths": input_paths_list, 
+				"executable": curr_job.mapper_exec,
+				"output_directory": self.tmpdir.name, 
+				"num_partitions": curr_job.num_reducers,
+				"worker_host": worker.host,
+				"worker_port": worker.port,
+			}
+		
+		elif self.running_processes is "reducing":
+			for curr_file in task.get("files"):
+				full_path = os.path.join(self.tmpdir.name, curr_file)
+				#full_path = string(self.tmpdir.name) + "/" + curr_file
+				input_paths_list.append(full_path)
+
+			task_message = {
+				"message_type": "new_reduce_task",
+				"task_id": task.get("task_id"),
+				"input_paths": input_paths_list, 
+				"executable": curr_job.reducer_exec,
+				"output_directory": curr_job.output_dir, 
+				"worker_host": worker.host,
+				"worker_port": worker.port,
+			}
+
+		else:
+			LOGGER.info("Error in assign_task")
+			task_message = {"Error": "Error in assign_task"}
 
 		# Send task message to worker
 		with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
