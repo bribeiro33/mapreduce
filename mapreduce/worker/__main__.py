@@ -1,5 +1,7 @@
 """MapReduce framework Worker node."""
+from contextlib import ExitStack
 import hashlib
+import heapq
 import os
 import logging
 import json
@@ -156,9 +158,64 @@ class Worker:
 		
 		# Clean up the temporary directory
 		tmpdir.cleanup()
-		LOGGER.info("Removed %s", tmpdir.name) # might have to use path not name
+		LOGGER.info("Removed %s", tmpdir.name)
 		
 		# 5. Send TCP message to Manager
+		self.send_completion_msg(task_id)
+
+	def reducing(self, message_dict):
+		"""Carry out reduce stage."""
+		self.state = "busy"
+
+		# get all the json variables for directing the work
+		task_id = message_dict["task_id"]
+		input_files = message_dict["input_paths"]
+		executable = message_dict["executable"]
+		output_dir = message_dict["output_directory"]
+
+		# 0.5 Create local temp dir
+		prefix = f"mapreduce-local-task{task_id:05d}-"
+		tmpdir = tempfile.TemporaryDirectory(prefix=prefix)
+		LOGGER.info("Created %s", tmpdir.name)
+
+		
+		with ExitStack() as stack:
+			# Open all input files
+			open_input = []
+			for file_name in input_files: 
+				open_input.append(stack.enter_context(open(file_name)))
+	
+			# Create temp output file in temp dir and open it
+			file_name = f"part-{task_id:05d}"
+			tmp_path= os.path.join(tmpdir.name, file_name)
+			outfile = stack.enter_context(open(tmp_path, "x"))
+			LOGGER.info("Created %s", tmp_path)
+
+			with subprocess.Popen(
+				[executable],
+				text=True,
+				stdin=subprocess.PIPE,
+				stdout=outfile,
+			) as reduce_process:
+				# 1. Merge input files into one sorted output stream. --> heapq.merge
+				# 2. Run the reduce executable on merged input, writing output to a single file.
+				for line in heapq.merge(*open_input): 
+					reduce_process.stdin.write(line)
+		LOGGER.info("Executed %s", executable)
+		# 3. Move the output file to the final output directory specified by the Manager.
+		dest_path = os.path.join(output_dir, file_name)
+		shutil.move(tmp_path, dest_path)
+		LOGGER.info("Moved %s -> %s", tmp_path, dest_path)
+
+		# Clean up the temporary directory
+		tmpdir.cleanup()
+		LOGGER.info("Removed %s", tmpdir.name)
+		
+		# 4. Send TCP message to Manager
+		self.send_completion_msg(task_id)
+
+	def send_completion_msg(self, task_id):
+		"""Send TCP completion message to the manager."""
 		message_dict = {
 			"message_type": "finished",
 			"task_id": task_id,
@@ -169,6 +226,7 @@ class Worker:
 			sock.connect((self.options["manager_host"], self.options["manager_port"]))
 			completion_msg = json.dumps(message_dict)
 			sock.sendall(completion_msg.encode('utf-8'))
+
 
 	def sort_file_lines(self, all_files, tmpdir_name):
 		"""Sort the content of all the given files by line."""
@@ -250,6 +308,10 @@ class Worker:
 				if message_dict["message_type"] == "new_map_task":
 					LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2),)
 					self.mapping(message_dict)
+
+				if message_dict["message_type"] == "new_reduce_task":
+					LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2),)
+					self.reducing(message_dict)
 
 			if self.hbthread.is_alive():
 					self.hbthread.join()            
