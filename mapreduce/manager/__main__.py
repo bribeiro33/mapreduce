@@ -318,7 +318,7 @@ class Manager:
 		# Preps input_paths by combining input_dir and file names
 		input_paths_list = []
 
-		if self.running_processes is "mapping":
+		if self.running_processes == "mapping":
 			for curr_file in task.get("files"):
 				full_path = curr_job.input_dir + "/" + curr_file
 				input_paths_list.append(full_path)
@@ -334,7 +334,7 @@ class Manager:
 				"worker_port": worker.port,
 			}
 		
-		elif self.running_processes is "reducing":
+		elif self.running_processes == "reducing":
 			for curr_file in task.get("files"):
 				full_path = os.path.join(self.tmpdir.name, curr_file)
 				#full_path = string(self.tmpdir.name) + "/" + curr_file
