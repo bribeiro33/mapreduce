@@ -133,6 +133,24 @@ class Manager:
 					self.finished_worker(message_dict)
 
 
+	def udp_listening(self):
+		"""Bind the socket and recieve UDP messages."""
+		with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+			# Bind the UDP socket to the server
+			sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+			sock.bind((self.options['host'], self.options['port']))
+			sock.settimeout(1)
+
+			# Receive incoming UDP messages
+			while True:
+					try:
+							message_bytes = sock.recv(4096)
+					except socket.timeout:
+							continue
+					message_str = message_bytes.decode("utf-8")
+					message_dict = json.loads(message_str)
+					print(message_dict)
+
 	def shutdown_manager(self, message_dict):
 		# if shutdown message has been received, will not go back into 
 		# while loop and will effectively, well, shutdown

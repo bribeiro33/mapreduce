@@ -117,16 +117,31 @@ class Worker:
 		tmpdir = tempfile.TemporaryDirectory(prefix=prefix)
 		LOGGER.info("Created %s", tmpdir.name)
 		
-		for input_path in input_paths:
-			# 1. Run map executable in input files, returns key-value pairs
-			with open(input_path) as infile:
+		with ExitStack() as stack:
+			# Open input_files and create a list of corresponding file objects
+			file_objs = []
+			for filename in input_paths:
+				file_objs.append(stack.enter_context(open(filename)))
+
+			# Create all partition files and create a list of corr file obj
+			partition_files = []
+			for i in range(0, num_partitions):
+				inter_file_name = f"maptask{task_id:05d}-part{i:05d}"
+				inter_file_path = os.path.join(tmpdir.name, inter_file_name)
+				# The 'a' appends the line instead of rewriting
+				partition_files.append(stack.enter_context(open(inter_file_path, 'a')))
+			
+			# For every input file, run the executable and pipe result to 
+			# correct partition intermediate file 
+			for input_file in file_objs:
+				# 1. Run map executable in input files, returns key-value pairs
 				with subprocess.Popen(
 					[executable],
-					stdin=infile,
+					stdin=input_file,
 					stdout=subprocess.PIPE,
 					text=True,
 				) as map_process:
-					LOGGER.info("Executed %s input=%s", executable, input_path)
+					LOGGER.info("Executed %s input=%s", executable, input_file)
 					# 2. partition the map output into several intermediate partition files
 					# Add line to correct partition output file
 					for line in map_process.stdout:
@@ -137,13 +152,8 @@ class Worker:
 						keyhash = int(hexdigest, base=16)
 						partition_number = keyhash % num_partitions
 
-						inter_file_name = f"maptask{task_id:05d}-part{partition_number:05d}"
-						# Create the full path to the intermediate file
-						inter_file_path = os.path.join(tmpdir.name, inter_file_name)
-						# Write the contents of line to the intermediate file
-						# The 'a' appends the line instead of rewriting
-						with open(inter_file_path, 'a') as inter_file:
-							inter_file.write(line)
+						# Write the contents of line to the intermediate partition file
+						partition_files[partition_number].write(line)
 
 		# 3. Sort each output file by line
 		all_inter_files = os.listdir(tmpdir.name)
