@@ -21,11 +21,12 @@ class WTag:
 	"""A class representing a Worker node's identifying info."""
 
 	# TODO: add job parameter later as needed
-	def __init__(self, host_in, port_in, state_in):
+	def __init__(self, host_in, port_in, state_in, time_in):
 		"""Construct a WTag instance"""
 		self.host = host_in
 		self.port = port_in
 		self.state = state_in
+		self.last_checkin = time_in
 
 class Job:
 	"""A class representing a Job task"""
@@ -46,12 +47,9 @@ class Manager:
 	def __init__(self, host, port):
 		"""Construct a Manager instance and start listening for messages."""
 		## commented out pwd bc it's long
-		LOGGER.info(
-			"Starting manager:%s", port,
-		)
-		LOGGER.info(
-			"PWD",
-		)
+		LOGGER.info("Starting manager:%s", port,)
+		LOGGER.info("PWD",)
+		
 		# Member vars
 		self.options = {
 			"host": host, 
@@ -68,12 +66,18 @@ class Manager:
 		
 		self.job_thread = threading.Thread(target=self.run_job)
 		self.tcp_thread = threading.Thread(target=self.tcp_listening)
+		self.udp_thread  = threading.Thread(target=self.udp_listening)
+		self.hb_thread = threading.Thread(target=self.worker_death_check)
 		
 		self.job_thread.start()
 		self.tcp_thread.start()
+		self.udp_thread.start()
+		self.hb_thread.start()
 		
 		self.job_thread.join()
 		self.tcp_thread.join()
+		self.udp_thread.join()
+		self.hb_thread.join()
 		
 		self.shutdown_workers()
 
@@ -125,10 +129,10 @@ class Manager:
 
 				elif message_dict["message_type"] == "register":
 					self.register_worker(message_dict)
-				
+
 				elif message_dict["message_type"] == "new_manager_job":
 					self.new_manager_job(message_dict)
-				
+
 				elif message_dict["message_type"] == "finished":
 					self.finished_worker(message_dict)
 
@@ -140,16 +144,34 @@ class Manager:
 			sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 			sock.bind((self.options['host'], self.options['port']))
 			sock.settimeout(1)
-
+			# No sock.listen() since UDP doesn't establish connections like TCP
 			# Receive incoming UDP messages
-			while True:
+			while not self.shutdown:
 					try:
 							message_bytes = sock.recv(4096)
 					except socket.timeout:
 							continue
 					message_str = message_bytes.decode("utf-8")
 					message_dict = json.loads(message_str)
-					print(message_dict)
+
+					# Update the worker's time when recieved new message
+					last_checkin = time.time()
+					for worker in self.workers: 
+						if (worker["worker_port"] == message_dict["worker_port"] and
+                worker["worker_host"] == message_dict["worker_host"]):
+									worker['last_checkin'] = last_checkin
+
+	def worker_death_check(self):
+		"""Thread for checking for workers who haven't reported in >10 seconds."""
+		while not self.shutdown:
+			time.sleep(0.1)
+			curr_time = time.time()
+			for worker in self.workers:
+				if curr_time - worker.last_checkin >= 10:
+					if worker.state == "busy":
+						if worker.
+					# All workers (busy, ready, dead) marked as dead here
+					worker.state = "dead"
 
 	def shutdown_manager(self, message_dict):
 		# if shutdown message has been received, will not go back into 
@@ -169,7 +191,8 @@ class Manager:
 		new_worker = WTag(
 			host_in=message_dict["worker_host"], 
 			port_in=message_dict["worker_port"], 
-			state_in="ready"
+			state_in="ready",
+			time_in=time.time() 
 			#job
 		)
 		self.workers[(new_worker.host, new_worker.port)] = new_worker
