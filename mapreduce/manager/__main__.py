@@ -27,6 +27,7 @@ class WTag:
 		self.port = port_in
 		self.state = state_in
 		self.last_checkin = time_in
+		self.task = None
 
 class Job:
 	"""A class representing a Job task"""
@@ -40,7 +41,7 @@ class Job:
 		self.num_mappers = num_mappers
 		self.num_reducers = num_reducers
 		self.is_completed = False
-	
+
 class Manager:
 	"""Represent a MapReduce framework Manager node."""
 
@@ -49,7 +50,7 @@ class Manager:
 		## commented out pwd bc it's long
 		LOGGER.info("Starting manager:%s", port,)
 		LOGGER.info("PWD",)
-		
+
 		# Member vars
 		self.options = {
 			"host": host, 
@@ -57,28 +58,29 @@ class Manager:
 		}
 		self.shutdown = False
 		self.workers = {}
-		
+
 		self.curr_job_id = 0
 		self.job_queue = Queue()
 		self.is_executing_job = False
 		self.running_process = "neither" # or "mapping" of "reducing"
 		self.tmpdir = None
-		
+		self.task_list = []
+
 		self.job_thread = threading.Thread(target=self.run_job)
 		self.tcp_thread = threading.Thread(target=self.tcp_listening)
 		self.udp_thread  = threading.Thread(target=self.udp_listening)
 		self.hb_thread = threading.Thread(target=self.worker_death_check)
-		
+
 		self.job_thread.start()
 		self.tcp_thread.start()
 		self.udp_thread.start()
 		self.hb_thread.start()
-		
+
 		self.job_thread.join()
 		self.tcp_thread.join()
 		self.udp_thread.join()
 		self.hb_thread.join()
-		
+
 		self.shutdown_workers()
 
 	def tcp_listening(self):
@@ -155,23 +157,27 @@ class Manager:
 					message_dict = json.loads(message_str)
 
 					# Update the worker's time when recieved new message
-					last_checkin = time.time()
-					for worker in self.workers: 
-						if (worker["worker_port"] == message_dict["worker_port"] and
-                worker["worker_host"] == message_dict["worker_host"]):
-									worker['last_checkin'] = last_checkin
+					curr_time = time.time()
+					for worker in self.workers.values(): 
+						if (worker.port == message_dict["worker_port"] and
+                worker.host == message_dict["worker_host"]):
+									worker.last_checkin = curr_time
+
 
 	def worker_death_check(self):
 		"""Thread for checking for workers who haven't reported in >10 seconds."""
 		while not self.shutdown:
 			time.sleep(0.1)
 			curr_time = time.time()
-			for worker in self.workers:
-				if curr_time - worker.last_checkin >= 10:
+			for worker in self.workers.values():
+				if worker.state != "dead" and curr_time - worker.last_checkin >= 10:
 					if worker.state == "busy":
-						if worker.
+						self.task_list.append(worker.task)
+						worker.task = None
 					# All workers (busy, ready, dead) marked as dead here
 					worker.state = "dead"
+					LOGGER.debug("worker_death_check %s %s", worker.port, worker.state)
+
 
 	def shutdown_manager(self, message_dict):
 		# if shutdown message has been received, will not go back into 
@@ -187,20 +193,33 @@ class Manager:
 			"recieved\n%s",
 			json.dumps(message_dict, indent=2),
 		)
-		# Add worker to worker list
-		new_worker = WTag(
-			host_in=message_dict["worker_host"], 
-			port_in=message_dict["worker_port"], 
-			state_in="ready",
-			time_in=time.time() 
-			#job
-		)
-		self.workers[(new_worker.host, new_worker.port)] = new_worker
+		worker_host = message_dict["worker_host"]
+		worker_port = message_dict["worker_port"]
+		# If worker has already registered in the past, change to ready state
+		# and check if had any tasks registered to it
+		possible_worker = self.workers.get((worker_host, worker_port))
+		if possible_worker:
+			possible_worker.state = "ready"
+			possible_worker.last_checkin = time.time()
+			# Re-add the task to the task list if they died during execution
+			if possible_worker.task:
+				self.task_list.insert(0, possible_worker.task)
+				possible_worker.task = None
+		else: 
+			# Add new worker to worker dict
+			new_worker = WTag(
+				host_in=worker_host, 
+				port_in=worker_port, 
+				state_in="ready",
+				time_in=time.time() 
+			)
+			self.workers[(new_worker.host, new_worker.port)] = new_worker
 		LOGGER.info("registered worker %s:%s",
-			message_dict["worker_host"], message_dict["worker_port"],
+			worker_host, worker_port,
 		)
 		# Send acknolegement to worker
-		self.send_ack(message_dict["worker_host"], message_dict["worker_port"])
+		self.send_ack(worker_host, worker_port)
+
 
 	def new_manager_job(self, message_dict):
 		# Recieved new job conf
@@ -215,32 +234,45 @@ class Manager:
 		# Increment curr_job_id for next Job added
 		self.curr_job_id += 1
 
+
 	def finished_worker(self, message_dict):
 		LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
 		this_worker = self.workers[(message_dict["worker_host"], message_dict["worker_port"])]
 		this_worker.state = "ready"
+		LOGGER.debug("finished worker %s %s", this_worker.port, this_worker.state)
+		this_worker.task = None
 
 
 	def send_ack(self, worker_host, worker_port):
 		"""Send the worker a registration ack."""
 		with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-			sock.connect((worker_host, worker_port))
-			reg_ack_message = json.dumps({
-				"message_type": "register_ack",
-				"worker_host": worker_host,
-				"worker_port": worker_port
-			})
-			sock.sendall(reg_ack_message.encode('utf-8'))
+			try:
+				sock.connect((worker_host, worker_port))
+				reg_ack_message = json.dumps({
+					"message_type": "register_ack",
+					"worker_host": worker_host,
+					"worker_port": worker_port
+				})
+				sock.sendall(reg_ack_message.encode('utf-8'))
+			except ConnectionRefusedError:
+				LOGGER.debug("ConnectionRefusedError")
+				self.workers[(worker_host, worker_port)].state = "dead"
+
 
 	def shutdown_workers(self):
 		"""Forward the shutdown message to all the workers."""
 		for worker in self.workers.values():
 			if worker.state != "dead":
 				with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-					sock.connect((worker.host, worker.port))
-					shutdown_message = json.dumps({"message_type": "shutdown"})
-					sock.sendall(shutdown_message.encode('utf-8'))
-	
+					try: 
+						sock.connect((worker.host, worker.port))
+						shutdown_message = json.dumps({"message_type": "shutdown"})
+						sock.sendall(shutdown_message.encode('utf-8'))
+					except ConnectionRefusedError:
+						LOGGER.debug("ConnectionRefusedError")
+						worker.state = "dead"
+
+
 	def run_job(self):
 		"""Start executing a new job"""
 		# If not currently exec job (and queue isn't empty), start new job
@@ -250,6 +282,8 @@ class Manager:
 				self.is_executing_job = True
 				curr_job = self.job_queue.get()
 
+				# Mapping 
+				LOGGER.info("Begin Map Stage")
 				# Delete output dir if it exists
 				if os.path.exists(curr_job.output_dir):
 					shutil.rmtree(curr_job.output_dir)
@@ -262,16 +296,26 @@ class Manager:
 				self.tmpdir = tempfile.TemporaryDirectory(prefix=prefix)
 				LOGGER.info("Created %s", self.tmpdir.name)
 
-				# Mapping 
-				LOGGER.info("Begin Map Stage")
+				# Execute mapping 
 				self.running_processes = "mapping"
 				new_map_tasks = self.map_partioning(curr_job)
-				self.distribute_new_tasks(new_map_tasks, curr_job)
+
+				# Make sure not to move on to reduce when a worker is busy w/ a task
+				while True: 
+					self.distribute_new_tasks(new_map_tasks, curr_job)
+					stage_complete = self.is_stage_complete()
+					if stage_complete:
+						LOGGER.debug("Should break here")
+						break
+					else:
+						LOGGER.debug("Pre sleep in mapping")
+						time.sleep(0.5)
+
 				LOGGER.info("End Map Stage")
 
 				# Reducing
 				LOGGER.info("begin Reduce Stage")
-				self.running_processes = "reducing"
+				self.running_processes = "reducing" # TODO: same thing as mapping once figure it out
 				new_reduce_tasks = self.reduce_partitioning()
 				self.distribute_new_tasks(new_reduce_tasks, curr_job)
 				LOGGER.info("end Reduce Stage")
@@ -284,6 +328,19 @@ class Manager:
 				self.is_executing_job = False
 				LOGGER.info("Finished job. Output directory: %s", curr_job.output_dir)
 			time.sleep(0.5)
+
+
+	def is_stage_complete(self):
+		"""Double check that the stage is complete."""
+		# If there are any busy workers, incomplete tasks
+		# If there are any dead workers with tasks, incomplete tasks
+		for worker in self.workers.values():
+			if worker.state == "busy":
+				return False
+			elif worker.state == "dead" and worker.task == None:
+				return False
+		return True
+
 
 	def map_partioning(self, curr_job):
 		"""Partition the input files into num_mappers partition"""
@@ -302,6 +359,7 @@ class Manager:
 			task_id += 1
 		
 		return partitions
+
 
 	def reduce_partitioning(self):
 		"""Put the files with the same parts in the same task."""
@@ -323,24 +381,32 @@ class Manager:
 	def distribute_new_tasks(self, new_tasks, curr_job):
 		"""Distribute the new_tasks to avaliable workers"""
 		curr_task_id = 0
-		while curr_task_id < len(new_tasks) and not self.shutdown:
+		self.task_list.extend(new_tasks)
+		LOGGER.debug("distribute_new_tasks task_list: %s", self.task_list)
+		while curr_task_id < len(self.task_list) and not self.shutdown:
 			for worker in self.workers.values():
 				if worker.state == "ready":
 					# Assign the task to the worker, change its state, 
 					# and increment the curr_task_id to get the next tasks's value
-					self.assign_task(worker, new_tasks[curr_task_id], curr_job)
+					self.assign_task(worker, self.task_list[curr_task_id], curr_job)
 					worker.state = "busy"
+					LOGGER.debug("distribute_new_tasks worker's state: %s %s", worker.port, worker.state)
 					curr_task_id += 1
 					break
 				else: 
 					time.sleep(0.5) # ???? TODO: check this, busy waiting?
-		
+
 
 	def assign_task(self, worker, task, curr_job):
 		"""Assign a task to the given worker --> send it to them"""
+		## Remove the task from the tasklist
+		try: 
+			self.tasklist.remove(task)
+		except ValueError:
+			LOGGER.debug("remove task from tasklist failed")
 		# Preps input_paths by combining input_dir and file names
 		input_paths_list = []
-
+		worker.task = task
 		if self.running_processes == "mapping":
 			for curr_file in task.get("files"):
 				full_path = curr_job.input_dir + "/" + curr_file
@@ -360,7 +426,6 @@ class Manager:
 		elif self.running_processes == "reducing":
 			for curr_file in task.get("files"):
 				full_path = os.path.join(self.tmpdir.name, curr_file)
-				#full_path = string(self.tmpdir.name) + "/" + curr_file
 				input_paths_list.append(full_path)
 
 			task_message = {
@@ -379,10 +444,16 @@ class Manager:
 
 		# Send task message to worker
 		with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-			sock.connect((worker.host, worker.port))
-			assign_task_message = json.dumps(task_message)
-			sock.sendall(assign_task_message.encode('utf-8'))
-
+			try:
+				sock.connect((worker.host, worker.port))
+				assign_task_message = json.dumps(task_message)
+				sock.sendall(assign_task_message.encode('utf-8'))
+			except ConnectionRefusedError:
+				LOGGER.debug("ConnectionRefusedError")
+				worker.state = "dead"
+				# task needs to be readded at the beginning of the list
+				self.task_list.insert(0, worker.task)  
+				worker.task = None
 
 
 
