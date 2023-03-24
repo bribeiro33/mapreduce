@@ -176,7 +176,6 @@ class Manager:
 						worker.task = None
 					# All workers (busy, ready, dead) marked as dead here
 					worker.state = "dead"
-					LOGGER.debug("worker_death_check %s %s", worker.port, worker.state)
 
 
 	def shutdown_manager(self, message_dict):
@@ -239,7 +238,6 @@ class Manager:
 		LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
 		this_worker = self.workers[(message_dict["worker_host"], message_dict["worker_port"])]
 		this_worker.state = "ready"
-		LOGGER.debug("finished worker %s %s", this_worker.port, this_worker.state)
 		this_worker.task = None
 
 
@@ -299,25 +297,29 @@ class Manager:
 				# Execute mapping 
 				self.running_processes = "mapping"
 				new_map_tasks = self.map_partioning(curr_job)
-
+				self.task_list.extend(new_map_tasks)
 				# Make sure not to move on to reduce when a worker is busy w/ a task
 				while True: 
-					self.distribute_new_tasks(new_map_tasks, curr_job)
-					stage_complete = self.is_stage_complete()
-					if stage_complete:
-						LOGGER.debug("Should break here")
+					self.distribute_new_tasks(curr_job)
+					if self.is_stage_complete():
 						break
 					else:
-						LOGGER.debug("Pre sleep in mapping")
 						time.sleep(0.5)
 
 				LOGGER.info("End Map Stage")
 
 				# Reducing
 				LOGGER.info("begin Reduce Stage")
-				self.running_processes = "reducing" # TODO: same thing as mapping once figure it out
+				self.running_processes = "reducing" 
 				new_reduce_tasks = self.reduce_partitioning()
-				self.distribute_new_tasks(new_reduce_tasks, curr_job)
+				self.task_list.extend(new_reduce_tasks)
+				
+				while True:
+					self.distribute_new_tasks(curr_job)
+					if self.is_stage_complete():
+						break
+					else: 
+						time.sleep(0.5)
 				LOGGER.info("end Reduce Stage")
 
 				self.running_processes = "neither"
@@ -337,7 +339,7 @@ class Manager:
 		for worker in self.workers.values():
 			if worker.state == "busy":
 				return False
-			elif worker.state == "dead" and worker.task == None:
+			elif worker.state == "dead" and worker.task != None:
 				return False
 		return True
 
@@ -378,11 +380,9 @@ class Manager:
 		return partitions
 
 
-	def distribute_new_tasks(self, new_tasks, curr_job):
+	def distribute_new_tasks(self, curr_job):
 		"""Distribute the new_tasks to avaliable workers"""
 		curr_task_id = 0
-		self.task_list.extend(new_tasks)
-		LOGGER.debug("distribute_new_tasks task_list: %s", self.task_list)
 		while curr_task_id < len(self.task_list) and not self.shutdown:
 			for worker in self.workers.values():
 				if worker.state == "ready":
@@ -390,7 +390,6 @@ class Manager:
 					# and increment the curr_task_id to get the next tasks's value
 					self.assign_task(worker, self.task_list[curr_task_id], curr_job)
 					worker.state = "busy"
-					LOGGER.debug("distribute_new_tasks worker's state: %s %s", worker.port, worker.state)
 					curr_task_id += 1
 					break
 				else: 
@@ -401,7 +400,7 @@ class Manager:
 		"""Assign a task to the given worker --> send it to them"""
 		## Remove the task from the tasklist
 		try: 
-			self.tasklist.remove(task)
+			self.task_list.remove(task)
 		except ValueError:
 			LOGGER.debug("remove task from tasklist failed")
 		# Preps input_paths by combining input_dir and file names
