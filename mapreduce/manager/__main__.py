@@ -314,13 +314,12 @@ class Manager:
                         time.sleep(0.5)
 
                 LOGGER.info("End Map Stage")
-                LOGGER.debug("Files post-map stage %s", os.listdir(self.tmpdir.name))
                 # Reducing
                 LOGGER.info("begin Reduce Stage")
                 self.running_processes = "reducing" 
                 new_reduce_tasks = self.reduce_partitioning()
                 self.task_list.extend(new_reduce_tasks)
-                
+
                 while True:
                     self.distribute_new_tasks(curr_job)
                     if self.is_stage_complete():
@@ -378,7 +377,7 @@ class Manager:
         dir_path = Path(self.tmpdir.name)
         # Get all the files in the tmp dir
         all_files = os.listdir(self.tmpdir.name)
-        
+
         while all_files:
             curr_part = "*-" + all_files[curr_task_id].split("-")[1]
             one_group = sorted(dir_path.glob(curr_part))
@@ -388,7 +387,6 @@ class Manager:
             partitions.append({"task_id": curr_task_id, "files": one_group})
             # Increment the task ID
             curr_task_id += 1
-        LOGGER.debug("reduce partitions: %s", partitions)
         return partitions
 
 
