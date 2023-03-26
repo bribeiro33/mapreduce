@@ -316,38 +316,39 @@ class Manager:
                 LOGGER.info("Created output")
                 # Create a shared dir for temp intermediate files
                 prefix = f"mapreduce-shared-job{curr_job.job_id:05d}-"
-                self.man_dict["tmpdir"] = tempfile.TemporaryDirectory(prefix=prefix)
-                LOGGER.info("Created %s", self.man_dict["tmpdir"].name)
+                with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+                    self.man_dict["tmpdir"] = tmpdir
+                    LOGGER.info("Created %s", tmpdir)
 
-                # Execute mapping
-                self.man_dict["running_processes"] = "mapping"
-                new_map_tasks = self.map_partioning(curr_job)
-                self.man_dict["task_list"].extend(new_map_tasks)
-				# Make sure not to move on to reduce when a worker is busy w/ a task
-                while True:
-                    self.distribute_new_tasks(curr_job)
-                    if self.is_stage_complete():
-                        break
-                    time.sleep(0.5)
+                    # Execute mapping
+                    self.man_dict["running_processes"] = "mapping"
+                    new_map_tasks = self.map_partioning(curr_job)
+                    self.man_dict["task_list"].extend(new_map_tasks)
+                    # Make sure not to move on to reduce when a worker is busy w/ a task
+                    while True:
+                        self.distribute_new_tasks(curr_job)
+                        if self.is_stage_complete():
+                            break
+                        time.sleep(0.5)
 
-                LOGGER.info("End Map Stage")
-                # Reducing
-                LOGGER.info("begin Reduce Stage")
-                self.man_dict["running_processes"] = "reducing"
-                new_reduce_tasks = self.reduce_partitioning()
-                self.man_dict["task_list"].extend(new_reduce_tasks)
+                    LOGGER.info("End Map Stage")
+                    # Reducing
+                    LOGGER.info("begin Reduce Stage")
+                    self.man_dict["running_processes"] = "reducing"
+                    new_reduce_tasks = self.reduce_partitioning()
+                    self.man_dict["task_list"].extend(new_reduce_tasks)
 
-                while True:
-                    self.distribute_new_tasks(curr_job)
-                    if self.is_stage_complete():
-                        break
-                    time.sleep(0.5)
-                LOGGER.info("end Reduce Stage")
+                    while True:
+                        self.distribute_new_tasks(curr_job)
+                        if self.is_stage_complete():
+                            break
+                        time.sleep(0.5)
+                    LOGGER.info("end Reduce Stage")
 
-                self.man_dict["running_processes"] = "neither"
-                # Clean up the temporary directory
-                self.man_dict["tmpdir"].cleanup()
-                LOGGER.info("Removed %s", self.man_dict["tmpdir"].name)
+                    self.man_dict["running_processes"] = "neither"
+
+                # Automatically deletes tmpdir after exiting "with"
+                LOGGER.info("Removed %s", self.man_dict["tmpdir"])
 
                 self.man_dict["is_executing_job"] = False
                 LOGGER.info("Finished job. Output directory: %s", curr_job.job_dict["output_dir"])
@@ -390,9 +391,9 @@ class Manager:
         """Put the files with the same parts in the same task."""
         partitions = []
         curr_task_id = 0
-        dir_path = Path(self.man_dict["tmpdir"].name)
+        dir_path = Path(self.man_dict["tmpdir"])
         # Get all the files in the tmp dir
-        all_files = os.listdir(self.man_dict["tmpdir"].name)
+        all_files = os.listdir(self.man_dict["tmpdir"])
 
         while all_files:
             curr_part = "*-" + all_files[curr_task_id].split("-")[1]
@@ -442,7 +443,7 @@ class Manager:
                 "task_id": task.get("task_id"),
                 "input_paths": input_paths_list,
                 "executable": curr_job.job_dict["mapper_exec"],
-                "output_directory": self.man_dict["tmpdir"].name,
+                "output_directory": self.man_dict["tmpdir"],
                 "num_partitions": curr_job.job_dict["num_reducers"],
                 "worker_host": worker.host,
                 "worker_port": worker.port,
@@ -450,7 +451,7 @@ class Manager:
 
         elif self.man_dict["running_processes"] == "reducing":
             for curr_file in task.get("files"):
-                full_path = os.path.join(self.man_dict["tmpdir"].name, curr_file)
+                full_path = os.path.join(self.man_dict["tmpdir"], curr_file)
                 input_paths_list.append(full_path)
 
             task_message = {
