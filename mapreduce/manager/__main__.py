@@ -21,7 +21,6 @@ LOGGER = logging.getLogger(__name__)
 class WTag:
     """A class representing a Worker node's identifying info."""
 
-    # TODO: add job parameter later as needed
     def __init__(self, host_in, port_in, state_in, time_in):
         """Construct a WTag instance"""
         self.host = host_in
@@ -54,7 +53,7 @@ class Job:
 
 
     def placeholder_func(self):
-        """do nothing pretty much, placeholder func for styling"""
+        """Do nothing pretty much, placeholder func for styling."""
         return self.job_dict
 
 
@@ -115,19 +114,19 @@ class Manager:
                 # Wait for a connection for 1s.  The socket library avoids
                 # consuming CPU while waiting for a connection.
                 try:
-                    clientsocket, address = sock.accept()
+                    clientsocket = sock.accept()
                 except socket.timeout:
                     continue
 
                 # Socket recv() will block for a maximum of 1 second.
-                # If you omit this, it blocks indefinitely, waiting for packets.
-                clientsocket.settimeout(1)
+                # If you omit this, it blocks indefinitely, waiting for packets
+                clientsocket[0].settimeout(1)
 
-                with clientsocket:
+                with clientsocket[0]:
                     message_chunks = []
                     while True:
                         try:
-                            data = clientsocket.recv(4096)
+                            data = clientsocket[0].recv(4096)
                         except socket.timeout:
                             continue
                         if not data:
@@ -173,13 +172,12 @@ class Manager:
                 message_str = message_bytes.decode("utf-8")
                 message_dict = json.loads(message_str)
 
-				# Update the worker's time when recieved new message
+            # Update the worker's time when recieved new message
                 curr_time = time.time()
                 for worker in self.man_dict["workers"].values():
                     if (worker.port == message_dict["worker_port"] and
-                        worker.host == message_dict["worker_host"]):
+                                    worker.host == message_dict["worker_host"]):
                         worker.last_checkin = curr_time
-
 
     def worker_death_check(self):
         """Checking for workers who haven't reported in >10 seconds."""
@@ -188,13 +186,12 @@ class Manager:
             curr_time = time.time()
             for worker in self.man_dict["workers"].values():
                 if worker.state != "dead" and \
-                    curr_time - worker.last_checkin >= 10:
+                                        curr_time - worker.last_checkin >= 10:
                     if worker.state == "busy":
                         self.man_dict["task_list"].append(worker.task)
                         worker.task = None
                     # All workers (busy, ready, dead) marked as dead here
                     worker.state = "dead"
-
 
     def shutdown_manager(self, message_dict):
         """Shutdown manager"""
@@ -203,7 +200,6 @@ class Manager:
         self.man_dict["shutdown"] = True
         LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
         LOGGER.info("shutting down")
-
 
     def register_worker(self, message_dict):
         """Register worker"""
@@ -216,7 +212,8 @@ class Manager:
         worker_port = message_dict["worker_port"]
         # If worker has already registered in the past, change to ready state
         # and check if had any tasks registered to it
-        possible_worker = self.man_dict["workers"].get((worker_host, worker_port))
+        curr_addr = (worker_host, worker_port)
+        possible_worker = self.man_dict["workers"].get(curr_addr)
         if possible_worker:
             possible_worker.state = "ready"
             possible_worker.last_checkin = time.time()
@@ -232,13 +229,13 @@ class Manager:
                 state_in="ready",
                 time_in=time.time()
             )
-            self.man_dict["workers"][(new_worker.host, new_worker.port)] = new_worker
+            worker_addr = (new_worker.host, new_worker.port)
+            self.man_dict["workers"][worker_addr] = new_worker
         LOGGER.info("registered worker %s:%s",
-            worker_host, worker_port,
-        )
+                    worker_host, worker_port,
+                    )
         # Send acknolegement to worker
         self.send_ack(worker_host, worker_port)
-
 
     def new_manager_job(self, message_dict):
         """New job"""
@@ -254,15 +251,13 @@ class Manager:
         # Increment curr_job_id for next Job added
         self.man_dict["curr_job_id"] += 1
 
-
     def finished_worker(self, message_dict):
         """Finished Worker"""
         LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
         this_worker = self.man_dict["workers"][(message_dict["worker_host"],
-                                    message_dict["worker_port"])]
+                                                message_dict["worker_port"])]
         this_worker.state = "ready"
         this_worker.task = None
-
 
     def send_ack(self, worker_host, worker_port):
         """Send the worker a registration ack."""
@@ -277,8 +272,8 @@ class Manager:
                 sock.sendall(reg_ack_message.encode('utf-8'))
             except ConnectionRefusedError:
                 LOGGER.debug("ConnectionRefusedError")
-                self.man_dict["workers"][(worker_host, worker_port)].state = "dead"
-
+                worker = self.man_dict["workers"][(worker_host, worker_port)]
+                worker.state = "dead"
 
     def shutdown_workers(self):
         """Forward the shutdown message to all the workers."""
@@ -295,13 +290,13 @@ class Manager:
                         LOGGER.debug("ConnectionRefusedError")
                         worker.state = "dead"
 
-
     def run_job(self):
         """Start executing a new job."""
-		# If not currently exec job (and queue isn't empty), start new job
-		# Manager runs each job to completion before starting a new one
+        # If not currently exec job (and queue isn't empty), start new job
+        # Manager runs each job to completion before starting a new one
         while not self.man_dict["shutdown"]:
-            if not self.man_dict["is_executing_job"] and not self.man_dict["job_queue"].empty():
+            if not self.man_dict["is_executing_job"] and \
+               not self.man_dict["job_queue"].empty():
                 self.man_dict["is_executing_job"] = True
                 curr_job = self.man_dict["job_queue"].get()
 
@@ -324,7 +319,8 @@ class Manager:
                     self.man_dict["running_processes"] = "mapping"
                     new_map_tasks = self.map_partioning(curr_job)
                     self.man_dict["task_list"].extend(new_map_tasks)
-                    # Make sure not to move on to reduce when a worker is busy w/ a task
+                    # Make sure not to move on to reduce when a worker is 
+                    # busy w/ a task
                     while True:
                         self.distribute_new_tasks(curr_job)
                         if self.is_stage_complete():
@@ -351,9 +347,9 @@ class Manager:
                 LOGGER.info("Removed %s", self.man_dict["tmpdir"])
 
                 self.man_dict["is_executing_job"] = False
-                LOGGER.info("Finished job. Output directory: %s", curr_job.job_dict["output_dir"])
+                LOGGER.info("Finished job. Output directory: %s", 
+                            curr_job.job_dict["output_dir"])
             time.sleep(0.5)
-
 
     def is_stage_complete(self):
         """Double check that the stage is complete."""
@@ -365,7 +361,6 @@ class Manager:
             if worker.state == "dead" and worker.task is not None:
                 return False
         return True
-
 
     def map_partioning(self, curr_job):
         """Partition the input files into num_mappers partition"""
@@ -379,13 +374,12 @@ class Manager:
         partitions = []
         task_id = 0
         # create num_mapper sublists with the files belonging to that partition
-        for files in [input_files[i::curr_job.job_dict["num_mappers"]] \
+        for files in [input_files[i::curr_job.job_dict["num_mappers"]]
                       for i in range(curr_job.job_dict["num_mappers"])]:
             partitions.append({"task_id": task_id, "files": files})
             task_id += 1
 
         return partitions
-
 
     def reduce_partitioning(self):
         """Put the files with the same parts in the same task."""
@@ -406,26 +400,26 @@ class Manager:
             curr_task_id += 1
         return partitions
 
-
     def distribute_new_tasks(self, curr_job):
         """Distribute the new_tasks to avaliable workers."""
         curr_task_id = 0
-        while curr_task_id < len(self.man_dict["task_list"]) and not self.man_dict["shutdown"]:
+        while curr_task_id < len(self.man_dict["task_list"]) and \
+              not self.man_dict["shutdown"]:
             for worker in self.man_dict["workers"].values():
                 if worker.state == "ready":
                     # Assign the task to the worker, change its state,
                     # increment the curr_task_id to get the next tasks's value
-                    self.assign_task(worker, self.man_dict["task_list"][curr_task_id],
+                    self.assign_task(worker, 
+                                     self.man_dict["task_list"][curr_task_id], 
                                      curr_job)
                     worker.state = "busy"
                     curr_task_id += 1
                     break
-                time.sleep(0.5) # ???? TODO: check this, busy waiting?
-
+                time.sleep(0.5)
 
     def assign_task(self, worker, task, curr_job):
         """Assign a task to the given worker --> send it to them"""
-        ## Remove the task from the tasklist
+        # Remove the task from the tasklist
         try:
             self.man_dict["task_list"].remove(task)
         except ValueError:
@@ -480,7 +474,6 @@ class Manager:
                 # task needs to be readded at the beginning of the list
                 self.man_dict["task_list"].insert(0, worker.task)
                 worker.task = None
-
 
 
 @click.command()
