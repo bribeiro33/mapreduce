@@ -17,8 +17,10 @@ import click
 # Configure logging
 LOGGER = logging.getLogger(__name__)
 
+
 class Worker:
     """A class representing a Worker node in a MapReduce cluster."""
+
     def __init__(self, host, port, manager_host, manager_port):
         """Construct a Worker instance and start listening for messages."""
         LOGGER.info(
@@ -29,8 +31,8 @@ class Worker:
         # Member vars
         self.state = "ready"
         self.shutdown = False
-        self.options= {
-            "host": host, 
+        self.options = {
+            "host": host,
             "port": port,
             "manager_host": manager_host,
             "manager_port": manager_port,
@@ -40,7 +42,6 @@ class Worker:
 
         self.register()
         self.tcp_listening()
-
 
     # function to access the worker's state variable from manager
     def get_state(self):
@@ -61,15 +62,16 @@ class Worker:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
 
             # connect to the server
-            sock.connect((self.options["manager_host"], self.options["manager_port"]))
+            sock.connect((self.options["manager_host"],
+                          self.options["manager_port"]))
 
             # send a message when worker is ready
             if self.state == "ready":
                 # this is the message
                 message_dict = {
-                    "message_type" : "register",
-                    "worker_host" : self.options["host"],
-                    "worker_port" : self.options["port"],
+                    "message_type": "register",
+                    "worker_host": self.options["host"],
+                    "worker_port": self.options["port"],
                 }
                 message = json.dumps(message_dict)
                 # send the message
@@ -77,14 +79,14 @@ class Worker:
 
     def send_heartbeat(self):
         """Send heartbeat once worker has been registered with manager."""
-
         # check if shutdown
         while not self.shutdown:
             # Create an INET, DGRAM socket, this is UDP
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
 
                 # Connect to the UDP socket on server
-                sock.connect((self.options["manager_host"], self.options["manager_port"]))
+                sock.connect((self.options["manager_host"],
+                              self.options["manager_port"]))
 
                 # Send a hb message
                 message_dict = {
@@ -99,10 +101,7 @@ class Worker:
 
     def mapping(self, message_dict):
         """Carry out mapping."""
-
         # mark state as busy since a task is beginning
-        ## ???? TODO: Gol: this is done in manager as well, which one do you think is
-        ## best to keep?
         self.state = "busy"
 
         # get all the json variables for directing the work
@@ -125,10 +124,14 @@ class Worker:
             LOGGER.info("Created %s", tmpdir.name)
 
             with ExitStack() as stack:
-                # Open input_files and create a list of corresponding file objects
+                # Open input_files and create a list of corresponding
+                # file objects
                 file_objs = []
                 for filename in map_dict["input_paths"]:
-                    file_objs.append(stack.enter_context(open(filename, encoding="utf8")))
+                    file_objs.append(stack.enter_context(open(
+                                                              filename,
+                                                              encoding="utf8"
+                                                              )))
 
                 # Create all partition files and create a list of corr file obj
                 partition_files = []
@@ -136,34 +139,28 @@ class Worker:
                     # The 'a' appends the line instead of rewriting
                     partition_files.append(stack.enter_context(
                         open(os.path.join(tmpdir.name,
-                                        f"maptask{task_id:05d}-part{i:05d}", 'a'), 
-                                        encoding="utf8")))
+                                          f"maptask{task_id:05d}-part{i:05d}",
+                                          'a'), encoding="utf8")))
 
                 # For every input file, run the executable and pipe result to
                 # correct partition intermediate file
                 for input_file in file_objs:
-                    # 1. Run map executable in input files, returns key-value pairs
+                    # 1. Run map executable in input files,
+                    # returns key-value pairs
                     with subprocess.Popen(
                         [map_dict["executable"]],
                         stdin=input_file,
                         stdout=subprocess.PIPE,
                         text=True,
                     ) as map_process:
-                        LOGGER.info("Executed %s input=%s", map_dict["executable"], input_file)
-                        # 2. partition the map output into several intermediate partition files
+                        LOGGER.info("Executed %s input=%s",
+                                    map_dict["executable"], input_file)
+                        # 2. partition the map output into several intermediate
+                        # partition files
                         # Add line to correct partition output file
                         for line in map_process.stdout:
-                            # Split the line by the tab to access the key
-                            # key = line.split('\t')[0]
-                            # Hash and mod the key to get partition number
-                            #hexdigest = hashlib.md5(line.split('\t')[0]
-                                # .encode("utf-8")).hexdigest()
-                            #keyhash = int(hexdigest, base=16)
-                            # partition_number = int(hashlib.md5(
-                            #    line.split('\t')[0]
-                            #    .encode("utf-8")).hexdigest(), base=16) % num_partitions
-
-                            # Write the contents of line to the intermediate partition file
+                            # Write the contents of line to the
+                            # intermediate partition file
                             partition_files[int(hashlib.md5(
                                 line.split('\t')[0]
                                 .encode("utf-8")).hexdigest(), base=16)
@@ -180,7 +177,8 @@ class Worker:
                 # dest_path = os.path.join(output_dir, file_name)
                 shutil.move(os.path.join(tmpdir.name, file_name),
                             os.path.join(map_dict["output_dir"], file_name))
-                LOGGER.info("Moved %s -> %s", os.path.join(tmpdir.name, file_name),
+                LOGGER.info("Moved %s -> %s",
+                            os.path.join(tmpdir.name, file_name),
                             os.path.join(map_dict["output_dir"], file_name))
 
             # Clean up the temporary directory
@@ -209,13 +207,16 @@ class Worker:
                 # Open all input files
                 open_input = []
                 for file_name in input_files:
-                    open_input.append(stack.enter_context(open(file_name, encoding="utf8")))
+                    open_input.append(stack.enter_context(
+                        open(file_name, encoding="utf8")
+                    ))
 
                 # Create temp output file in temp dir and open it
                 file_name = f"part-{task_id:05d}"
                 # tmp_path= os.path.join(tmpdir.name, file_name)
                 outfile = stack.enter_context(open(
-                    os.path.join(tmpdir.name, file_name), "x", encoding="utf8"))
+                    os.path.join(tmpdir.name, file_name), "x",
+                    encoding="utf8"))
                 LOGGER.info("Created %s", os.path.join(tmpdir.name, file_name))
 
                 with subprocess.Popen(
@@ -254,10 +255,10 @@ class Worker:
             "worker_port": self.options['port'],
         }
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect((self.options["manager_host"], self.options["manager_port"]))
+            sock.connect((self.options["manager_host"],
+                          self.options["manager_port"]))
             completion_msg = json.dumps(message_dict)
             sock.sendall(completion_msg.encode('utf-8'))
-
 
     def sort_file_lines(self, all_files, tmpdir_name):
         """Sort the content of all the given files by line."""
@@ -293,7 +294,8 @@ class Worker:
                 except socket.timeout:
                     continue
 
-                # Socket recv() will block for a maximum of 1 second.  If you omit
+                # Socket recv() will block for a maximum of 1 second.
+                # If you omit
                 # this, it blocks indefinitely, waiting for packets.
                 clientsocket[0].settimeout(1)
 
@@ -320,11 +322,13 @@ class Worker:
                 # Handle message & threads
                 # threads = []
                 if message_dict["message_type"] == "shutdown":
-                    # if shutdown message has been received, will not go back into
-                    # while loop and will effectively, well, shutdown
+                    # if shutdown message has been received,
+                    # will not go back into while loop and will
+                    # effectively, well, shutdown
                     self.shutdown = True
 
-                    LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
+                    LOGGER.debug("recieved\n%s",
+                                 json.dumps(message_dict, indent=2))
                     LOGGER.info("shutting down",)
                     # print("server() shutting down")
                 if message_dict["message_type"] == "register_ack":
@@ -336,16 +340,17 @@ class Worker:
                     # threads.append(thread)
                     self.hbthread.start()
                 if message_dict["message_type"] == "new_map_task":
-                    LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2),)
+                    LOGGER.debug("recieved\n%s",
+                                 json.dumps(message_dict, indent=2),)
                     self.mapping(message_dict)
 
                 if message_dict["message_type"] == "new_reduce_task":
-                    LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2),)
+                    LOGGER.debug("recieved\n%s",
+                                 json.dumps(message_dict, indent=2),)
                     self.reducing(message_dict)
 
             if self.hbthread.is_alive():
                 self.hbthread.join()
-
 
 
 @click.command()
