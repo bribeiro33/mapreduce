@@ -22,7 +22,7 @@ class WTag:
     """A class representing a Worker node's identifying info."""
 
     def __init__(self, host_in, port_in, state_in, time_in):
-        """Construct a WTag instance"""
+        """Construct a WTag instance."""
         self.host = host_in
         self.port = port_in
         self.state = state_in
@@ -30,17 +30,17 @@ class WTag:
         self.task = None
 
     def placeholder_func(self):
-        """do nothing pretty much, placeholder func for styling"""
+        """Do nothing pretty much, placeholder func for styling."""
         return self.task
 
 
 class Job:
-    """A class representing a Job task"""
+    """A class representing a Job task."""
 
     # dont hate me im turning this into a dictionary
 
     def __init__(self, id_in, dict_in):
-        """Construct a Job instance"""
+        """Construct a Job instance."""
         self.job_id = id_in
         self.job_dict = {}
         self.job_dict["input_dir"] = dict_in["input_directory"]
@@ -51,7 +51,6 @@ class Job:
         self.job_dict["num_reducers"] = dict_in["num_reducers"]
         self.job_dict["is_completed"] = False
 
-
     def placeholder_func(self):
         """Do nothing pretty much, placeholder func for styling."""
         return self.job_dict
@@ -59,10 +58,8 @@ class Job:
 
 class Manager:
     """Represent a MapReduce framework Manager node."""
-
     def __init__(self, host, port):
         """Construct a Manager instance and start listening for messages."""
-
         LOGGER.info("Starting manager:%s", port,)
         LOGGER.info("PWD %s", os.getcwd())
 
@@ -176,7 +173,7 @@ class Manager:
                 curr_time = time.time()
                 for worker in self.man_dict["workers"].values():
                     if (worker.port == message_dict["worker_port"] and
-                                    worker.host == message_dict["worker_host"]):
+                            worker.host == message_dict["worker_host"]):
                         worker.last_checkin = curr_time
 
     def worker_death_check(self):
@@ -319,7 +316,7 @@ class Manager:
                     self.man_dict["running_processes"] = "mapping"
                     new_map_tasks = self.map_partioning(curr_job)
                     self.man_dict["task_list"].extend(new_map_tasks)
-                    # Make sure not to move on to reduce when a worker is 
+                    # Make sure not to move on to reduce when a worker is
                     # busy w/ a task
                     while True:
                         self.distribute_new_tasks(curr_job)
@@ -347,7 +344,7 @@ class Manager:
                 LOGGER.info("Removed %s", self.man_dict["tmpdir"])
 
                 self.man_dict["is_executing_job"] = False
-                LOGGER.info("Finished job. Output directory: %s", 
+                LOGGER.info("Finished job. Output directory: %s",
                             curr_job.job_dict["output_dir"])
             time.sleep(0.5)
 
@@ -403,14 +400,14 @@ class Manager:
     def distribute_new_tasks(self, curr_job):
         """Distribute the new_tasks to avaliable workers."""
         curr_task_id = 0
-        while curr_task_id < len(self.man_dict["task_list"]) and \
-              not self.man_dict["shutdown"]:
+        num_task = len(self.man_dict["task_list"])
+        while curr_task_id < num_task and not self.man_dict["shutdown"]:
             for worker in self.man_dict["workers"].values():
                 if worker.state == "ready":
                     # Assign the task to the worker, change its state,
                     # increment the curr_task_id to get the next tasks's value
-                    self.assign_task(worker, 
-                                     self.man_dict["task_list"][curr_task_id], 
+                    self.assign_task(worker,
+                                     self.man_dict["task_list"][curr_task_id],
                                      curr_job)
                     worker.state = "busy"
                     curr_task_id += 1
