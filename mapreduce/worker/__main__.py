@@ -101,7 +101,7 @@ class Worker:
         """Carry out mapping."""
 
         # mark state as busy since a task is beginning
-        ## TODO: Gol: this is done in manager as well, which one do you think is
+        ## ???? TODO: Gol: this is done in manager as well, which one do you think is
         ## best to keep?
         self.state = "busy"
 
