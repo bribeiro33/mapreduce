@@ -23,8 +23,10 @@ case $1 in
     "start")
 		if pgrep -f mapreduce-manager &> /dev/null; then
             echo "Error: mapreduce-manager is already running"
+            exit 1
 		elif pgrep -f mapreduce-worker &> /dev/null; then 
 			echo "Error: mapreduce-worker is already running"
+            exit 1
 		else 
 			echo "starting mapreduce ..."
 			mkdir -p var/log
