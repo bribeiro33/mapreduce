@@ -30,19 +30,32 @@ class WTag:
         self.last_checkin = time_in
         self.task = None
 
+    def placeholder_func(self):
+        """do nothing pretty much, placeholder func for styling"""
+        return self.task
+
+
 class Job:
     """A class representing a Job task"""
-    def __init__(self, id, input_directory, output_directory, mapper_executable,
-                 reducer_executable, num_mappers, num_reducers):
+
+    # dont hate me im turning this into a dictionary
+
+    def __init__(self, id_in, dict_in):
         """Construct a Job instance"""
-        self.job_id = id
-        self.input_dir = input_directory
-        self.output_dir = output_directory
-        self.mapper_exec = mapper_executable
-        self.reducer_exec = reducer_executable
-        self.num_mappers = num_mappers
-        self.num_reducers = num_reducers
-        self.is_completed = False
+        self.job_id = id_in
+        self.job_dict = {}
+        self.job_dict["input_dir"] = dict_in["input_directory"]
+        self.job_dict["output_dir"] = dict_in["output_directory"]
+        self.job_dict["mapper_exec"] = dict_in["mapper_executable"]
+        self.job_dict["reducer_exec"] = dict_in["reducer_executable"]
+        self.job_dict["num_mappers"] = dict_in["num_mappers"]
+        self.job_dict["num_reducers"] = dict_in["num_reducers"]
+        self.job_dict["is_completed"] = False
+ 
+
+    def placeholder_func(self):
+        """do nothing pretty much, placeholder func for styling"""
+        return self.job_dict
 
 
 class Manager:
@@ -65,13 +78,13 @@ class Manager:
         self.curr_job_id = 0
         self.job_queue = Queue()
         self.is_executing_job = False
-        self.running_process = "neither" # or "mapping" of "reducing"
+        self.running_process = "neither"  # or "mapping" of "reducing"
         self.tmpdir = None
         self.task_list = []
 
         self.job_thread = threading.Thread(target=self.run_job)
         self.tcp_thread = threading.Thread(target=self.tcp_listening)
-        self.udp_thread  = threading.Thread(target=self.udp_listening)
+        self.udp_thread = threading.Thread(target=self.udp_listening)
         self.hb_thread = threading.Thread(target=self.worker_death_check)
 
         self.job_thread.start()
@@ -104,7 +117,7 @@ class Manager:
                 except socket.timeout:
                     continue
 
-                # Socket recv() will block for a maximum of 1 second.  
+                # Socket recv() will block for a maximum of 1 second.
                 # If you omit this, it blocks indefinitely, waiting for packets.
                 clientsocket.settimeout(1)
 
@@ -141,7 +154,6 @@ class Manager:
                 elif message_dict["message_type"] == "finished":
                     self.finished_worker(message_dict)
 
-
     def udp_listening(self):
         """Bind the socket and recieve UDP messages."""
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -152,19 +164,19 @@ class Manager:
             # No sock.listen() since UDP doesn't establish connections like TCP
             # Receive incoming UDP messages
             while not self.shutdown:
-                    try:
-                            message_bytes = sock.recv(4096)
-                    except socket.timeout:
-                            continue
-                    message_str = message_bytes.decode("utf-8")
-                    message_dict = json.loads(message_str)
+                try:
+                    message_bytes = sock.recv(4096)
+                except socket.timeout:
+                    continue
+                message_str = message_bytes.decode("utf-8")
+                message_dict = json.loads(message_str)
 
-                    # Update the worker's time when recieved new message
-                    curr_time = time.time()
-                    for worker in self.workers.values():
-                        if (worker.port == message_dict["worker_port"] and
-                worker.host == message_dict["worker_host"]):
-                                    worker.last_checkin = curr_time
+				# Update the worker's time when recieved new message
+                curr_time = time.time()
+                for worker in self.workers.values():
+                    if (worker.port == message_dict["worker_port"] and
+                        worker.host == message_dict["worker_host"]):
+                        worker.last_checkin = curr_time
 
 
     def worker_death_check(self):
@@ -231,7 +243,7 @@ class Manager:
         message_dict.pop("message_type", None)
 
         # Create a new Job instance using own tracker and json data
-        new_job = Job(id=self.curr_job_id, **message_dict)
+        new_job = Job(id_in=self.curr_job_id, dict_in=message_dict)
         # Add to queue
         self.job_queue.put(new_job)
         # Increment curr_job_id for next Job added
@@ -240,7 +252,7 @@ class Manager:
 
     def finished_worker(self, message_dict):
         LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
-        this_worker = self.workers[(message_dict["worker_host"], 
+        this_worker = self.workers[(message_dict["worker_host"],
                                     message_dict["worker_port"])]
         this_worker.state = "ready"
         this_worker.task = None
@@ -287,26 +299,26 @@ class Manager:
                 self.is_executing_job = True
                 curr_job = self.job_queue.get()
 
-                # Mapping 
+                # Mapping
                 LOGGER.info("Begin Map Stage")
                 # Delete output dir if it exists
-                if os.path.exists(curr_job.output_dir):
-                    shutil.rmtree(curr_job.output_dir)
-                
+                if os.path.exists(curr_job.job_dict["output_dir"]):
+                    shutil.rmtree(curr_job.job_dict["output_dir"])
+
                 # create new output directory
-                os.makedirs(curr_job.output_dir)
+                os.makedirs(curr_job.job_dict["output_dir"])
                 LOGGER.info("Created output")
                 # Create a shared dir for temp intermediate files
                 prefix = f"mapreduce-shared-job{curr_job.job_id:05d}-"
                 self.tmpdir = tempfile.TemporaryDirectory(prefix=prefix)
                 LOGGER.info("Created %s", self.tmpdir.name)
 
-                # Execute mapping 
+                # Execute mapping
                 self.running_processes = "mapping"
                 new_map_tasks = self.map_partioning(curr_job)
                 self.task_list.extend(new_map_tasks)
 				# Make sure not to move on to reduce when a worker is busy w/ a task
-                while True: 
+                while True:
                     self.distribute_new_tasks(curr_job)
                     if self.is_stage_complete():
                         break
@@ -316,7 +328,7 @@ class Manager:
                 LOGGER.info("End Map Stage")
                 # Reducing
                 LOGGER.info("begin Reduce Stage")
-                self.running_processes = "reducing" 
+                self.running_processes = "reducing"
                 new_reduce_tasks = self.reduce_partitioning()
                 self.task_list.extend(new_reduce_tasks)
 
@@ -324,7 +336,7 @@ class Manager:
                     self.distribute_new_tasks(curr_job)
                     if self.is_stage_complete():
                         break
-                    else: 
+                    else:
                         time.sleep(0.5)
                 LOGGER.info("end Reduce Stage")
 
@@ -334,7 +346,7 @@ class Manager:
                 LOGGER.info("Removed %s", self.tmpdir.name)
 
                 self.is_executing_job = False
-                LOGGER.info("Finished job. Output directory: %s", curr_job.output_dir)
+                LOGGER.info("Finished job. Output directory: %s", curr_job.job_dict["output_dir"])
             time.sleep(0.5)
 
 
@@ -354,7 +366,7 @@ class Manager:
         """Partition the input files into num_mappers partition"""
         # Each partition is a "new_map_task"
         # Get the input files from the job's input directory
-        input_files = os.listdir(curr_job.input_dir)
+        input_files = os.listdir(curr_job.job_dict["input_dir"])
         # Sort the input files by name
         input_files.sort()
         # Partition the input files into num_mappers partions using round robin
@@ -362,8 +374,8 @@ class Manager:
         partitions = []
         task_id = 0
         # create num_mapper sublists with the files belonging to that partition
-        for files in [input_files[i::curr_job.num_mappers] \
-                      for i in range(curr_job.num_mappers)]:
+        for files in [input_files[i::curr_job.job_dict["num_mappers"]] \
+                      for i in range(curr_job.job_dict["num_mappers"])]:
             partitions.append({"task_id": task_id, "files": files})
             task_id += 1
 
@@ -398,7 +410,7 @@ class Manager:
                 if worker.state == "ready":
                     # Assign the task to the worker, change its state,
                     # increment the curr_task_id to get the next tasks's value
-                    self.assign_task(worker, self.task_list[curr_task_id], 
+                    self.assign_task(worker, self.task_list[curr_task_id],
                                      curr_job)
                     worker.state = "busy"
                     curr_task_id += 1
@@ -419,16 +431,16 @@ class Manager:
         worker.task = task
         if self.running_processes == "mapping":
             for curr_file in task.get("files"):
-                full_path = curr_job.input_dir + "/" + curr_file
+                full_path = curr_job.job_dict["input_dir"] + "/" + curr_file
                 input_paths_list.append(full_path)
 
             task_message = {
                 "message_type": "new_map_task",
                 "task_id": task.get("task_id"),
                 "input_paths": input_paths_list,
-                "executable": curr_job.mapper_exec,
+                "executable": curr_job.job_dict["mapper_exec"],
                 "output_directory": self.tmpdir.name,
-                "num_partitions": curr_job.num_reducers,
+                "num_partitions": curr_job.job_dict["num_reducers"],
                 "worker_host": worker.host,
                 "worker_port": worker.port,
             }
@@ -442,8 +454,8 @@ class Manager:
                 "message_type": "new_reduce_task",
                 "task_id": task.get("task_id"),
                 "input_paths": input_paths_list,
-                "executable": curr_job.reducer_exec,
-                "output_directory": curr_job.output_dir,
+                "executable": curr_job.job_dict["reducer_exec"],
+                "output_directory": curr_job.job_dict["output_dir"],
                 "worker_host": worker.host,
                 "worker_port": worker.port,
             }
