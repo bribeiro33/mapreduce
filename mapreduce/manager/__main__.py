@@ -153,6 +153,8 @@ class Manager:
                 elif message_dict["message_type"] == "finished":
                     self.finished_worker(message_dict)
 
+                time.sleep(0.1)
+
     def udp_listening(self):
         """Bind the socket and recieve UDP messages."""
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
@@ -170,12 +172,13 @@ class Manager:
                 message_str = message_bytes.decode("utf-8")
                 message_dict = json.loads(message_str)
 
-            # Update the worker's time when recieved new message
+                # Update the worker's time when recieved new message
                 curr_time = time.time()
                 for worker in self.man_dict["workers"].values():
                     if (worker.port == message_dict["worker_port"] and
                             worker.host == message_dict["worker_host"]):
                         worker.last_checkin = curr_time
+                time.sleep(0.1)
 
     def worker_death_check(self):
         """Check for workers who haven't reported in >10 seconds."""
@@ -190,6 +193,7 @@ class Manager:
                         worker.task = None
                     # All workers (busy, ready, dead) marked as dead here
                     worker.state = "dead"
+            time.sleep(0.1)
 
     def shutdown_manager(self, message_dict):
         """Shutdown manager."""
@@ -402,7 +406,7 @@ class Manager:
         """Distribute the new_tasks to avaliable workers."""
         curr_task_id = 0
         num_task = len(self.man_dict["task_list"])
-        while curr_task_id < num_task and not self.man_dict["shutdown"]:
+        while curr_task_id < len(self.man_dict["task_list"]) and not self.man_dict["shutdown"]:
             for worker in self.man_dict["workers"].values():
                 if worker.state == "ready":
                     # Assign the task to the worker, change its state,
