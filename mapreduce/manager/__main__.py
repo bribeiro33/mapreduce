@@ -405,8 +405,8 @@ class Manager:
     def distribute_new_tasks(self, curr_job):
         """Distribute the new_tasks to avaliable workers."""
         curr_task_id = 0
-        num_task = len(self.man_dict["task_list"])
-        while curr_task_id < len(self.man_dict["task_list"]) and not self.man_dict["shutdown"]:
+        while curr_task_id < len(self.man_dict["task_list"]) and \
+                not self.man_dict["shutdown"]:
             for worker in self.man_dict["workers"].values():
                 if worker.state == "ready":
                     # Assign the task to the worker, change its state,
