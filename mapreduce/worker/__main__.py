@@ -8,13 +8,10 @@ import json
 import shutil
 import tempfile
 import time
-import click
-import socket
-import string
 import threading
-import mapreduce.utils
-from pathlib import Path
 import subprocess
+import socket
+import click
 
 
 # Configure logging
@@ -46,13 +43,16 @@ class Worker:
 
 
     # function to access the worker's state variable from manager
-    def get_state(self): 
+    def get_state(self):
+        """Access function."""
         return self.state
-    
+
     def get_workerhost(self):
+        """Access function."""
         return self.options["host"]
-    
+
     def get_workerport(self):
+        """Access function."""
         return self.options["port"]
 
     def register(self):
@@ -64,7 +64,7 @@ class Worker:
             sock.connect((self.options["manager_host"], self.options["manager_port"]))
 
             # send a message when worker is ready
-            if (self.state == "ready"):
+            if self.state == "ready":
                 # this is the message
                 message_dict = {
                     "message_type" : "register",
@@ -74,7 +74,7 @@ class Worker:
                 message = json.dumps(message_dict)
                 # send the message
                 sock.sendall(message.encode('utf-8'))
-    
+
     def send_heartbeat(self):
         """Send heartbeat once worker has been registered with manager."""
 
@@ -96,82 +96,99 @@ class Worker:
                 # send the message
                 sock.sendall(message.encode('utf-8'))
             time.sleep(2)
-    
+
     def mapping(self, message_dict):
         """Carry out mapping."""
 
         # mark state as busy since a task is beginning
-        ## TODO: Gol: this is done in manager as well, which one do you think is 
+        ## TODO: Gol: this is done in manager as well, which one do you think is
         ## best to keep?
         self.state = "busy"
 
         # get all the json variables for directing the work
+        # stored in a dictionary for styling
+        map_dict = {
+            "input_paths": message_dict["input_paths"],
+            "executable": message_dict["executable"],
+            "output_dir": message_dict["output_directory"],
+            "num_partitions": message_dict["num_partitions"]
+        }
         task_id = message_dict["task_id"]
-        input_paths = message_dict["input_paths"]
-        executable = message_dict["executable"]
-        output_dir = message_dict["output_directory"]
-        num_partitions = message_dict["num_partitions"]
+        # input_paths = message_dict["input_paths"]
+        # executable = message_dict["executable"]
+        # output_dir = message_dict["output_directory"]
+        # num_partitions = message_dict["num_partitions"]
 
         # 0.5 Create local temp dir
         prefix = f"mapreduce-local-task{task_id:05d}-"
-        tmpdir = tempfile.TemporaryDirectory(prefix=prefix)
-        LOGGER.info("Created %s", tmpdir.name)
-        
-        with ExitStack() as stack:
-            # Open input_files and create a list of corresponding file objects
-            file_objs = []
-            for filename in input_paths:
-                file_objs.append(stack.enter_context(open(filename)))
+        with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+            LOGGER.info("Created %s", tmpdir.name)
 
-            # Create all partition files and create a list of corr file obj
-            partition_files = []
-            for i in range(0, num_partitions):
-                inter_file_name = f"maptask{task_id:05d}-part{i:05d}"
-                inter_file_path = os.path.join(tmpdir.name, inter_file_name)
-                # The 'a' appends the line instead of rewriting
-                partition_files.append(stack.enter_context(open(inter_file_path, 'a')))
-            
-            # For every input file, run the executable and pipe result to 
-            # correct partition intermediate file 
-            for input_file in file_objs:
-                # 1. Run map executable in input files, returns key-value pairs
-                with subprocess.Popen(
-                    [executable],
-                    stdin=input_file,
-                    stdout=subprocess.PIPE,
-                    text=True,
-                ) as map_process:
-                    LOGGER.info("Executed %s input=%s", executable, input_file)
-                    # 2. partition the map output into several intermediate partition files
-                    # Add line to correct partition output file
-                    for line in map_process.stdout:
-                        # Split the line by the tab to access the key
-                        key = line.split('\t')[0]
-                        # Hash and mod the key to get partition number
-                        hexdigest = hashlib.md5(key.encode("utf-8")).hexdigest()
-                        keyhash = int(hexdigest, base=16)
-                        partition_number = keyhash % num_partitions
+            with ExitStack() as stack:
+                # Open input_files and create a list of corresponding file objects
+                file_objs = []
+                for filename in map_dict["input_paths"]:
+                    file_objs.append(stack.enter_context(open(filename, encoding="utf8")))
 
-                        # Write the contents of line to the intermediate partition file
-                        partition_files[partition_number].write(line)
+                # Create all partition files and create a list of corr file obj
+                partition_files = []
+                for i in range(0, map_dict["num_partitions"]):
+                    # The 'a' appends the line instead of rewriting
+                    partition_files.append(stack.enter_context(
+                        open(os.path.join(tmpdir.name,
+                                        f"maptask{task_id:05d}-part{i:05d}", 'a'), 
+                                        encoding="utf8")))
 
-        # 3. Sort each output file by line
-        all_inter_files = os.listdir(tmpdir.name)
-        self.sort_file_lines(all_inter_files, tmpdir.name)
+                # For every input file, run the executable and pipe result to
+                # correct partition intermediate file
+                for input_file in file_objs:
+                    # 1. Run map executable in input files, returns key-value pairs
+                    with subprocess.Popen(
+                        [map_dict["executable"]],
+                        stdin=input_file,
+                        stdout=subprocess.PIPE,
+                        text=True,
+                    ) as map_process:
+                        LOGGER.info("Executed %s input=%s", map_dict["executable"], input_file)
+                        # 2. partition the map output into several intermediate partition files
+                        # Add line to correct partition output file
+                        for line in map_process.stdout:
+                            # Split the line by the tab to access the key
+                            # key = line.split('\t')[0]
+                            # Hash and mod the key to get partition number
+                            #hexdigest = hashlib.md5(line.split('\t')[0]
+                                # .encode("utf-8")).hexdigest()
+                            #keyhash = int(hexdigest, base=16)
+                            # partition_number = int(hashlib.md5(
+                            #    line.split('\t')[0]
+                            #    .encode("utf-8")).hexdigest(), base=16) % num_partitions
 
-        # 4. Move each sorted output file to the shared temporary directory specified by the Manager
-        for file_name in all_inter_files:
-            src_path = os.path.join(tmpdir.name, file_name)
-            dest_path = os.path.join(output_dir, file_name)
-            shutil.move(src_path, dest_path)
-            LOGGER.info("Moved %s -> %s", src_path, dest_path)
-        
-        # Clean up the temporary directory
-        tmpdir.cleanup()
-        LOGGER.info("Removed %s", tmpdir.name)
-        
-        # 5. Send TCP message to Manager
-        self.send_completion_msg(task_id)
+                            # Write the contents of line to the intermediate partition file
+                            partition_files[int(hashlib.md5(
+                                line.split('\t')[0]
+                                .encode("utf-8")).hexdigest(), base=16)
+                                % map_dict["num_partitions"]].write(line)
+
+            # 3. Sort each output file by line
+            # all_inter_files = os.listdir(tmpdir.name)
+            self.sort_file_lines(os.listdir(tmpdir.name), tmpdir.name)
+
+            # 4. Move each sorted output file to the shared
+            # temporary directory specified by the Manager
+            for file_name in os.listdir(tmpdir.name):
+                # src_path = os.path.join(tmpdir.name, file_name)
+                # dest_path = os.path.join(output_dir, file_name)
+                shutil.move(os.path.join(tmpdir.name, file_name),
+                            os.path.join(map_dict["output_dir"], file_name))
+                LOGGER.info("Moved %s -> %s", os.path.join(tmpdir.name, file_name),
+                            os.path.join(map_dict["output_dir"], file_name))
+
+            # Clean up the temporary directory
+            tmpdir.cleanup()
+            LOGGER.info("Removed %s", tmpdir.name)
+
+            # 5. Send TCP message to Manager
+            self.send_completion_msg(task_id)
 
     def reducing(self, message_dict):
         """Carry out reduce stage."""
@@ -185,44 +202,48 @@ class Worker:
 
         # 0.5 Create local temp dir
         prefix = f"mapreduce-local-task{task_id:05d}-"
-        tmpdir = tempfile.TemporaryDirectory(prefix=prefix)
-        LOGGER.info("Created %s", tmpdir.name)
+        with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
+            LOGGER.info("Created %s", tmpdir.name)
 
-        
-        with ExitStack() as stack:
-            # Open all input files
-            open_input = []
-            for file_name in input_files: 
-                open_input.append(stack.enter_context(open(file_name)))
-    
-            # Create temp output file in temp dir and open it
-            file_name = f"part-{task_id:05d}"
-            tmp_path= os.path.join(tmpdir.name, file_name)
-            outfile = stack.enter_context(open(tmp_path, "x"))
-            LOGGER.info("Created %s", tmp_path)
+            with ExitStack() as stack:
+                # Open all input files
+                open_input = []
+                for file_name in input_files:
+                    open_input.append(stack.enter_context(open(file_name, encoding="utf8")))
 
-            with subprocess.Popen(
-                [executable],
-                text=True,
-                stdin=subprocess.PIPE,
-                stdout=outfile,
-            ) as reduce_process:
-                # 1. Merge input files into one sorted output stream. --> heapq.merge
-                # 2. Run the reduce executable on merged input, writing output to a single file.
-                for line in heapq.merge(*open_input): 
-                    reduce_process.stdin.write(line)
-        LOGGER.info("Executed %s", executable)
-        # 3. Move the output file to the final output directory specified by the Manager.
-        dest_path = os.path.join(output_dir, file_name)
-        shutil.move(tmp_path, dest_path)
-        LOGGER.info("Moved %s -> %s", tmp_path, dest_path)
+                # Create temp output file in temp dir and open it
+                file_name = f"part-{task_id:05d}"
+                # tmp_path= os.path.join(tmpdir.name, file_name)
+                outfile = stack.enter_context(open(
+                    os.path.join(tmpdir.name, file_name), "x", encoding="utf8"))
+                LOGGER.info("Created %s", os.path.join(tmpdir.name, file_name))
 
-        # Clean up the temporary directory
-        tmpdir.cleanup()
-        LOGGER.info("Removed %s", tmpdir.name)
-        
-        # 4. Send TCP message to Manager
-        self.send_completion_msg(task_id)
+                with subprocess.Popen(
+                    [executable],
+                    text=True,
+                    stdin=subprocess.PIPE,
+                    stdout=outfile,
+                ) as reduce_process:
+                    # 1. Merge input files into one sorted
+                    # output stream. --> heapq.merge
+                    # 2. Run the reduce executable on merged input,
+                    # writing output to a single file.
+                    for line in heapq.merge(*open_input):
+                        reduce_process.stdin.write(line)
+            LOGGER.info("Executed %s", executable)
+            # 3. Move the output file to the final output
+            # directory specified by the Manager.
+            dest_path = os.path.join(output_dir, file_name)
+            shutil.move(os.path.join(tmpdir.name, file_name), dest_path)
+            LOGGER.info("Moved %s -> %s",
+                        os.path.join(tmpdir.name, file_name), dest_path)
+
+            # Clean up the temporary directory
+            tmpdir.cleanup()
+            LOGGER.info("Removed %s", tmpdir.name)
+
+            # 4. Send TCP message to Manager
+            self.send_completion_msg(task_id)
 
     def send_completion_msg(self, task_id):
         """Send TCP completion message to the manager."""
@@ -243,14 +264,14 @@ class Worker:
         for file_name in all_files:
             # Open the file in read mode
             file_path = os.path.join(tmpdir_name, file_name)
-            with open(file_path, 'r') as f:
+            with open(file_path, 'r', encoding="utf8") as f_open:
                 # Read the lines from the file and sort them
-                lines = f.readlines()
+                lines = f_open.readlines()
                 lines.sort()
 
             # Write the sorted lines back to the file
-            with open(file_path, 'w') as f:
-                f.writelines(lines)
+            with open(file_path, 'w', encoding="utf8") as f_open:
+                f_open.writelines(lines)
             LOGGER.info("Sorted %s", file_path)
 
     def tcp_listening(self):
@@ -264,23 +285,23 @@ class Worker:
             sock.settimeout(1)
 
             while not self.shutdown:
-                    
+
                 # Wait for a connection for 1s.  The socket library avoids
                 # consuming CPU while waiting for a connection.
                 try:
-                    clientsocket, address = sock.accept()
+                    clientsocket = sock.accept()
                 except socket.timeout:
                     continue
 
                 # Socket recv() will block for a maximum of 1 second.  If you omit
                 # this, it blocks indefinitely, waiting for packets.
-                clientsocket.settimeout(1)
+                clientsocket[0].settimeout(1)
 
-                with clientsocket:
+                with clientsocket[0]:
                     message_chunks = []
                     while True:
                         try:
-                            data = clientsocket.recv(4096)
+                            data = clientsocket[0].recv(4096)
                         except socket.timeout:
                             continue
                         if not data:
@@ -297,13 +318,12 @@ class Worker:
                     continue
 
                 # Handle message & threads
-
                 # threads = []
                 if message_dict["message_type"] == "shutdown":
-                    # if shutdown message has been received, will not go back into 
+                    # if shutdown message has been received, will not go back into
                     # while loop and will effectively, well, shutdown
                     self.shutdown = True
-                    
+
                     LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
                     LOGGER.info("shutting down",)
                     # print("server() shutting down")
@@ -314,7 +334,7 @@ class Worker:
                     )
                     # create thread
                     # threads.append(thread)
-                    self.hbthread.start()  
+                    self.hbthread.start()
                 if message_dict["message_type"] == "new_map_task":
                     LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2),)
                     self.mapping(message_dict)
@@ -324,7 +344,7 @@ class Worker:
                     self.reducing(message_dict)
 
             if self.hbthread.is_alive():
-                    self.hbthread.join()            
+                self.hbthread.join()
 
 
 
