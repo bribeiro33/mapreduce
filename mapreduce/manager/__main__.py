@@ -131,7 +131,6 @@ class Manager:
                             break
                         message_chunks.append(data)
 
-                # Decode list-of-byte-strings to UTF8 and parse JSON data
                 message_bytes = b''.join(message_chunks)
                 message_str = message_bytes.decode("utf-8")
 
