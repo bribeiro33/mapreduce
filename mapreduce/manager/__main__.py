@@ -58,6 +58,7 @@ class Job:
 
 class Manager:
     """Represent a MapReduce framework Manager node."""
+
     def __init__(self, host, port):
         """Construct a Manager instance and start listening for messages."""
         LOGGER.info("Starting manager:%s", port,)
@@ -177,7 +178,7 @@ class Manager:
                         worker.last_checkin = curr_time
 
     def worker_death_check(self):
-        """Checking for workers who haven't reported in >10 seconds."""
+        """Check for workers who haven't reported in >10 seconds."""
         while not self.man_dict["shutdown"]:
             time.sleep(0.1)
             curr_time = time.time()
@@ -191,7 +192,7 @@ class Manager:
                     worker.state = "dead"
 
     def shutdown_manager(self, message_dict):
-        """Shutdown manager"""
+        """Shutdown manager."""
         # if shutdown message has been received, will not go back into
         # while loop and will effectively, well, shutdown
         self.man_dict["shutdown"] = True
@@ -199,7 +200,7 @@ class Manager:
         LOGGER.info("shutting down")
 
     def register_worker(self, message_dict):
-        """Register worker"""
+        """Register worker."""
         # Worker is ready to listen
         LOGGER.debug(
             "recieved\n%s",
@@ -235,7 +236,7 @@ class Manager:
         self.send_ack(worker_host, worker_port)
 
     def new_manager_job(self, message_dict):
-        """New job"""
+        """Recieved new job."""
         # Recieved new job conf
         LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
         # Remove message_type from message_dict
@@ -249,7 +250,7 @@ class Manager:
         self.man_dict["curr_job_id"] += 1
 
     def finished_worker(self, message_dict):
-        """Finished Worker"""
+        """Finished Worker."""
         LOGGER.debug("recieved\n%s", json.dumps(message_dict, indent=2))
         this_worker = self.man_dict["workers"][(message_dict["worker_host"],
                                                 message_dict["worker_port"])]
@@ -360,7 +361,7 @@ class Manager:
         return True
 
     def map_partioning(self, curr_job):
-        """Partition the input files into num_mappers partition"""
+        """Partition the input files into num_mappers partition."""
         # Each partition is a "new_map_task"
         # Get the input files from the job's input directory
         input_files = os.listdir(curr_job.job_dict["input_dir"])
@@ -415,7 +416,7 @@ class Manager:
                 time.sleep(0.5)
 
     def assign_task(self, worker, task, curr_job):
-        """Assign a task to the given worker --> send it to them"""
+        """Assign a task to the given worker --> send it to them."""
         # Remove the task from the tasklist
         try:
             self.man_dict["task_list"].remove(task)
