@@ -139,8 +139,8 @@ class Worker:
                     # The 'a' appends the line instead of rewriting
                     partition_files.append(stack.enter_context(
                         open(os.path.join(tmpdir,
-                                          f"maptask{task_id:05d}-part{i:05d}",
-                                          'a'), encoding="utf8")))
+                                          f"maptask{task_id:05d}-part{i:05d}"),
+                                          'a', encoding="utf8")))
 
                 # For every input file, run the executable and pipe result to
                 # correct partition intermediate file
@@ -239,8 +239,6 @@ class Worker:
             LOGGER.info("Moved %s -> %s",
                         os.path.join(tmpdir, file_name), dest_path)
 
-            # Clean up the temporary directory
-            tmpdir.cleanup()
             LOGGER.info("Removed %s", tmpdir)
 
             # 4. Send TCP message to Manager
