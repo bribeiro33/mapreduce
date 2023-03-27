@@ -140,7 +140,7 @@ class Worker:
                     partition_files.append(stack.enter_context(
                         open(os.path.join(tmpdir,
                                           f"maptask{task_id:05d}-part{i:05d}"),
-                                          'a', encoding="utf8")))
+                             'a', encoding="utf8")))
 
                 # For every input file, run the executable and pipe result to
                 # correct partition intermediate file
@@ -285,32 +285,36 @@ class Worker:
                 # Wait for a connection for 1s.  The socket library avoids
                 # consuming CPU while waiting for a connection.
                 try:
-                    clientsocket, address = sock.accept()
+                    clientsocket = sock.accept()
+                    running = True
                 except socket.timeout:
+                    running = True
                     continue
 
-                # Socket recv() will block for a maximum of 1 second
-                # If you omit
-                # this, it blocks indefinitely, waiting for packets.
-                clientsocket.settimeout(1)
+                clientsocket[0].settimeout(1)
 
-                with clientsocket:
-                    message_chunks = []
-                    while True:
+                with clientsocket[0]:
+                    msg_chunks = []
+                    running = True
+                    while running:
                         try:
-                            data = clientsocket.recv(4096)
+                            data = clientsocket[0].recv(4096)
+                            running = True
                         except socket.timeout:
                             continue
                         if not data:
+                            running = True
                             break
-                        message_chunks.append(data)
+                        msg_chunks.append(data)
 
                 # Decode list-of-byte-strings to UTF8 and parse JSON data
-                message_bytes = b''.join(message_chunks)
+                message_bytes = b''.join(msg_chunks)
+                running = True
                 message_str = message_bytes.decode("utf-8")
 
                 try:
                     message_dict = json.loads(message_str)
+                    running = True
                 except json.JSONDecodeError:
                     continue
 

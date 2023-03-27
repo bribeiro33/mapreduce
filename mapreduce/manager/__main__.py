@@ -104,7 +104,9 @@ class Manager:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             # Bind the socket to the server
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind((self.options["host"], self.options["port"]))
+            host = self.options["host"]
+            port = self.options["port"]
+            sock.bind((host, port))
             sock.listen()
             sock.settimeout(1)
 
@@ -418,8 +420,7 @@ class Manager:
                     worker.state = "busy"
                     curr_task_id += 1
                     break
-                else:
-                    time.sleep(0.5)
+                time.sleep(0.5)
 
     def assign_task(self, worker, task, curr_job):
         """Assign a task to the given worker --> send it to them."""
