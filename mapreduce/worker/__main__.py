@@ -121,7 +121,7 @@ class Worker:
         # 0.5 Create local temp dir
         prefix = f"mapreduce-local-task{task_id:05d}-"
         with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
-            LOGGER.info("Created %s", tmpdir.name)
+            LOGGER.info("Created %s", tmpdir)
 
             with ExitStack() as stack:
                 # Open input_files and create a list of corresponding
@@ -138,7 +138,7 @@ class Worker:
                 for i in range(0, map_dict["num_partitions"]):
                     # The 'a' appends the line instead of rewriting
                     partition_files.append(stack.enter_context(
-                        open(os.path.join(tmpdir.name,
+                        open(os.path.join(tmpdir,
                                           f"maptask{task_id:05d}-part{i:05d}",
                                           'a'), encoding="utf8")))
 
@@ -167,23 +167,22 @@ class Worker:
                                 % map_dict["num_partitions"]].write(line)
 
             # 3. Sort each output file by line
-            # all_inter_files = os.listdir(tmpdir.name)
-            self.sort_file_lines(os.listdir(tmpdir.name), tmpdir.name)
+            # all_inter_files = os.listdir(tmpdir)
+            self.sort_file_lines(os.listdir(tmpdir), tmpdir)
 
             # 4. Move each sorted output file to the shared
             # temporary directory specified by the Manager
-            for file_name in os.listdir(tmpdir.name):
-                # src_path = os.path.join(tmpdir.name, file_name)
+            for file_name in os.listdir(tmpdir):
+                # src_path = os.path.join(tmpdir, file_name)
                 # dest_path = os.path.join(output_dir, file_name)
-                shutil.move(os.path.join(tmpdir.name, file_name),
+                shutil.move(os.path.join(tmpdir, file_name),
                             os.path.join(map_dict["output_dir"], file_name))
                 LOGGER.info("Moved %s -> %s",
-                            os.path.join(tmpdir.name, file_name),
+                            os.path.join(tmpdir, file_name),
                             os.path.join(map_dict["output_dir"], file_name))
 
             # Clean up the temporary directory
-            tmpdir.cleanup()
-            LOGGER.info("Removed %s", tmpdir.name)
+            LOGGER.info("Removed %s", tmpdir)
 
             # 5. Send TCP message to Manager
             self.send_completion_msg(task_id)
@@ -201,7 +200,7 @@ class Worker:
         # 0.5 Create local temp dir
         prefix = f"mapreduce-local-task{task_id:05d}-"
         with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
-            LOGGER.info("Created %s", tmpdir.name)
+            LOGGER.info("Created %s", tmpdir)
 
             with ExitStack() as stack:
                 # Open all input files
@@ -213,11 +212,12 @@ class Worker:
 
                 # Create temp output file in temp dir and open it
                 file_name = f"part-{task_id:05d}"
-                # tmp_path= os.path.join(tmpdir.name, file_name)
+                LOGGER.debug("in reducing, os.path.join %s", os.path.join(tmpdir, file_name))
+                # tmp_path= os.path.join(tmpdir, file_name)
                 outfile = stack.enter_context(open(
-                    os.path.join(tmpdir.name, file_name), "x",
+                    os.path.join(tmpdir, file_name), "x",
                     encoding="utf8"))
-                LOGGER.info("Created %s", os.path.join(tmpdir.name, file_name))
+                LOGGER.info("Created %s", os.path.join(tmpdir, file_name))
 
                 with subprocess.Popen(
                     [executable],
@@ -235,13 +235,13 @@ class Worker:
             # 3. Move the output file to the final output
             # directory specified by the Manager.
             dest_path = os.path.join(output_dir, file_name)
-            shutil.move(os.path.join(tmpdir.name, file_name), dest_path)
+            shutil.move(os.path.join(tmpdir, file_name), dest_path)
             LOGGER.info("Moved %s -> %s",
-                        os.path.join(tmpdir.name, file_name), dest_path)
+                        os.path.join(tmpdir, file_name), dest_path)
 
             # Clean up the temporary directory
             tmpdir.cleanup()
-            LOGGER.info("Removed %s", tmpdir.name)
+            LOGGER.info("Removed %s", tmpdir)
 
             # 4. Send TCP message to Manager
             self.send_completion_msg(task_id)
@@ -299,14 +299,13 @@ class Worker:
 
                 with clientsocket:
                     msg_chunks = []
-                    keep_running = True
-                    while keep_running:
+                    while True:
                         try:
                             data = clientsocket.recv(4096)
                         except socket.timeout:
                             continue
                         if data is None:
-                            keep_running = False
+                            break
                         msg_chunks.append(data)
 
                 # Decode list-of-byte-strings to UTF8 and parse JSON data
