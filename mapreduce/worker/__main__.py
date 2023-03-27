@@ -275,43 +275,43 @@ class Worker:
 
     def tcp_listening(self):
         """Listen for incoming messages from manager."""
-        # Create an INET, STREAMing socket, this is TCP
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            # Bind the socket to the server
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            host = self.options["host"]
-            port = self.options["port"]
-            sock.bind((host, port))
+            sock.bind((self.options["host"], self.options["port"]))
             sock.listen()
             sock.settimeout(1)
 
             while not self.shutdown:
-
                 # Wait for a connection for 1s.  The socket library avoids
                 # consuming CPU while waiting for a connection.
                 try:
-                    clientsocket, _ = sock.accept()
+                    clientsocket, address = sock.accept()
                 except socket.timeout:
                     continue
 
+                # Socket recv() will block for a maximum of 1 second.  
+                # If you omit
+                # this, it blocks indefinitely, waiting for packets.
                 clientsocket.settimeout(1)
 
                 with clientsocket:
-                    msg_chunks = []
+                    message_chunks = []
                     while True:
                         try:
                             data = clientsocket.recv(4096)
                         except socket.timeout:
                             continue
-                        if data is None:
+                        if not data:
                             break
-                        msg_chunks.append(data)
+                        message_chunks.append(data)
 
                 # Decode list-of-byte-strings to UTF8 and parse JSON data
-                msg_bytes = b''.join(msg_chunks)
-                msg_str = msg_bytes.decode("utf-8")
+                message_bytes = b''.join(message_chunks)
+                message_str = message_bytes.decode("utf-8")
 
                 try:
-                    message_dict = json.loads(msg_str)
+                    message_dict = json.loads(message_str)
                 except json.JSONDecodeError:
                     continue
 

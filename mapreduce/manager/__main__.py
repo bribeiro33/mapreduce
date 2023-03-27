@@ -310,6 +310,7 @@ class Manager:
                 # create new output directory
                 os.makedirs(curr_job.job_dict["output_dir"])
                 LOGGER.info("Created output")
+
                 # Create a shared dir for temp intermediate files
                 prefix = f"mapreduce-shared-job{curr_job.job_id:05d}-"
                 with tempfile.TemporaryDirectory(prefix=prefix) as tmpdir:
@@ -325,6 +326,7 @@ class Manager:
                     while True:
                         self.distribute_new_tasks(curr_job)
                         if self.is_stage_complete():
+                            LOGGER.info("Reached here3")
                             break
                         time.sleep(0.5)
 
@@ -416,7 +418,8 @@ class Manager:
                     worker.state = "busy"
                     curr_task_id += 1
                     break
-                time.sleep(0.5)
+                else:
+                    time.sleep(0.5)
 
     def assign_task(self, worker, task, curr_job):
         """Assign a task to the given worker --> send it to them."""
@@ -425,6 +428,7 @@ class Manager:
             self.man_dict["task_list"].remove(task)
         except ValueError:
             LOGGER.debug("remove task from tasklist failed")
+
         # Preps input_paths by combining input_dir and file names
         input_paths_list = []
         worker.task = task
@@ -432,7 +436,6 @@ class Manager:
             for curr_file in task.get("files"):
                 full_path = curr_job.job_dict["input_dir"] + "/" + curr_file
                 input_paths_list.append(full_path)
-
             task_message = {
                 "message_type": "new_map_task",
                 "task_id": task.get("task_id"),
