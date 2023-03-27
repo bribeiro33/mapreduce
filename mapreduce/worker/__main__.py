@@ -212,7 +212,6 @@ class Worker:
 
                 # Create temp output file in temp dir and open it
                 file_name = f"part-{task_id:05d}"
-                LOGGER.debug("in reducing, os.path.join %s", os.path.join(tmpdir, file_name))
                 # tmp_path= os.path.join(tmpdir, file_name)
                 outfile = stack.enter_context(open(
                     os.path.join(tmpdir, file_name), "x",
@@ -290,7 +289,7 @@ class Worker:
                 except socket.timeout:
                     continue
 
-                # Socket recv() will block for a maximum of 1 second.  
+                # Socket recv() will block for a maximum of 1 second
                 # If you omit
                 # this, it blocks indefinitely, waiting for packets.
                 clientsocket.settimeout(1)
